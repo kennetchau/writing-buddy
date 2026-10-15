@@ -1,0 +1,13 @@
+# Novel app — schedule the nightly backup (backend doc §6).
+# 03:30 UTC daily + catch-up at boot (Persistent=true).
+[Unit]
+Description=Novel app nightly backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+OnBootSec=15min
+Persistent=true
+Unit=novel-backup.service
+
+[Install]
+WantedBy=timers.target

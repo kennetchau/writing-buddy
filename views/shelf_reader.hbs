@@ -1,0 +1,36 @@
+<h1>{{story.title}}</h1>
+{{#if story.universe_name}}<p class="muted">World: {{story.universe_name}}</p>{{else}}<p class="muted">original world</p>{{/if}}
+<p><a href="/shelf">← shelf</a></p>
+
+<div class="story-grid">
+  <div>
+    <details class="shelf-chapters" {{#if selected}}open{{/if}}>
+      <summary>Chapters ({{chapters.length}})</summary>
+      <ol id="shelf-chapters">
+        {{#each chapters}}
+        <li>
+          <a href="/shelf/{{../story.id}}?chapter={{seq}}" class="{{#if (eq seq ../selectedSeq)}}active{{/if}}">#{{seq}} · {{title}}</a>
+        </li>
+        {{/each}}
+      </ol>
+    </details>
+  </div>
+  <div class="reader">
+    {{#if selected}}
+    <div class="chapter-nav">
+      {{#if prevSeq}}<a class="button chapter-nav-btn" href="/shelf/{{story.id}}?chapter={{prevSeq}}">← #{{prevSeq}} · {{prevTitle}}</a>{{/if}}
+      <span class="spacer"></span>
+      {{#if nextSeq}}<a class="button chapter-nav-btn" href="/shelf/{{story.id}}?chapter={{nextSeq}}">#{{nextSeq}} · {{nextTitle}} →</a>{{/if}}
+    </div>
+    <h2>#{{selected.seq}} · {{selected.title}}</h2>
+    {{{selectedHtml}}}
+    <div class="chapter-nav">
+      {{#if prevSeq}}<a class="button chapter-nav-btn" href="/shelf/{{story.id}}?chapter={{prevSeq}}">← #{{prevSeq}} · {{prevTitle}}</a>{{else}}<span class="muted">— start of story —</span>{{/if}}
+      <span class="spacer"></span>
+      {{#if nextSeq}}<a class="button chapter-nav-btn" href="/shelf/{{story.id}}?chapter={{nextSeq}}">#{{nextSeq}} · {{nextTitle}} →</a>{{else}}<span class="muted">— end of story —</span>{{/if}}
+    </div>
+    {{else}}
+    <p class="muted">No chapters.</p>
+    {{/if}}
+  </div>
+</div>

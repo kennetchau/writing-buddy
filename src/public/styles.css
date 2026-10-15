@@ -1,0 +1,366 @@
+/* One plain CSS file, dark and minimal (frontend doc §1). No framework. */
+:root {
+  --bg: #14161a;
+  --bg-panel: #1c1f26;
+  --bg-input: #232733;
+  --fg: #dfe3ea;
+  --fg-muted: #8b93a1;
+  --accent: #6ea8fe;
+  --error: #f28b82;
+  --ok: #81c995;
+  --border: #2e333f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.frame { display: flex; min-height: 100vh; }
+
+.navbar {
+  width: 160px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.navbar a {
+  color: var(--fg-muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+.navbar a:hover { color: var(--fg); background: var(--bg-input); }
+.navbar a.active { color: var(--fg); font-weight: 700; }
+.nav-sep { border-top: 1px solid var(--border); margin: 8px 4px; }
+.nav-logout { margin-top: 4px; }
+.nav-logout button {
+  background: none; border: none; color: var(--fg-muted);
+  cursor: pointer; font: inherit; padding: 6px 10px; width: 100%;
+  text-align: left; border-radius: 6px;
+}
+.nav-logout button:hover { color: var(--fg); background: var(--bg-input); }
+
+.content { flex: 1; padding: 24px 32px; max-width: 1100px; }
+
+h1 { font-size: 1.5rem; margin-top: 0; }
+h2 { font-size: 1.2rem; }
+
+a { color: var(--accent); }
+
+input, textarea, select, button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+textarea { width: 100%; min-height: 14em; resize: vertical; }
+label { display: block; margin: 10px 0 4px; color: var(--fg-muted); }
+button { cursor: pointer; }
+
+/* ---------- CodeMirror editors (CR round 3: live markdown — outline +
+   chapter body). Match the app's textarea look; hide the line-number and
+   fold gutters (it's a writing pane, not code). ---------- */
+/* SEVER the editor's intrinsic width from the document (2026-10-12 mobile
+   bug): .cm-content is `white-space: pre`, so its min-content width is the
+   full width of the longest line — one long AI paragraph made the story
+   page's min-content width ~2000px+. Mobile browsers (iOS Safari most of
+   all) size the layout viewport at least that wide → the <860px media query
+   stopped matching and the whole app reflowed to the scaled-down desktop
+   layout ("desktop site, everything stretched out"). `contain: inline-size`
+   makes the host contribute 0 to the document's intrinsic width (the
+   editor keeps its own fixed height; long lines scroll inside .cm-scroller
+   and wrap via EditorView.lineWrapping). `overflow-x: hidden` is the
+   belt-and-braces clip for any stray absolutely-positioned piece. */
+.md-host {
+  contain: inline-size;
+  overflow-x: hidden;
+  min-width: 0;
+}
+.md-host .cm-editor {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.md-host .cm-editor.cm-focused { outline: none; border-color: var(--accent); }
+.md-host .cm-gutters { display: none; }
+.md-host .cm-content [data-language] { padding-left: 2px; }
+.cm-tooltip.cm-tooltip-autocomplete {
+  font-family: inherit;
+  font-size: 0.85rem;
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.cm-tooltip-autocomplete > ul > li { color: var(--fg); padding: 3px 8px; }
+.cm-tooltip-autocomplete > ul > li[aria-selected="true"] {
+  background: var(--accent);
+  color: #0d1117;
+}
+.cm-completionDetail { color: var(--fg-muted); font-size: 0.8em; }
+.cm-completionInfo {
+  color: var(--fg-muted);
+  font-size: 0.8em;
+  max-width: 42ch;
+  border-left: 1px solid var(--border);
+  padding-left: 8px;
+  white-space: normal;
+}
+button:hover { border-color: var(--accent); }
+
+.error { color: var(--error); }
+.muted { color: var(--fg-muted); }
+
+/* summarize hint banner (story page, FR-23a) — "do you want to summarize now?" */
+.hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 12px 0;
+}
+.hint-actions { margin-left: auto; display: flex; gap: 8px; }
+.hint-pref { display: inline-flex; align-items: center; gap: 6px; }
+.num-input { width: 4.5em; }
+.settings-sep { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+/* extracted style result (story page stream pane, FR-22e) */
+.style-result {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #101216;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+
+.login-box {
+  max-width: 340px;
+  margin: 12vh auto 0;
+  padding: 24px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.login-box h1 { margin-bottom: 8px; }
+.login-box form { display: flex; flex-direction: column; gap: 4px; }
+.login-box button { margin-top: 12px; }
+.login-box .remember { display: flex; align-items: center; gap: 6px; color: var(--fg-muted); }
+.login-box .remember input { margin: 0; }
+
+/* AI working badge (frontend doc §2) — links to the AI Monitor */
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 0.85rem;
+  padding: 4px 8px;
+  text-decoration: none;
+}
+.ai-badge:hover { text-decoration: underline; }
+.ai-badge-spinner {
+  width: 10px; height: 10px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* "the AI is writing this story" indicator (story page, per-story view of
+   the global AI badge) */
+.writing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 400;
+  margin-left: 8px;
+}
+.writing::before {
+  content: "";
+  width: 10px; height: 10px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* streaming pane (used from Phase 4 onward) */
+.stream-pane {
+  background: #101216;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  min-height: 6em;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+.badge.final, .badge.finalized { color: var(--ok); }
+.badge.draft { color: var(--accent); }
+/* "✓ summarized" (story page): which chapters the AI can remember */
+.badge.summary { color: var(--ok); border-color: var(--ok); }
+/* summary status of the chapter open in the editing pane */
+.summary-status { margin: 4px 0 0; font-size: 0.88rem; }
+.summary-status.ok { color: var(--ok); }
+
+.story-grid { display: grid; grid-template-columns: 280px 1fr; gap: 28px; margin-top: 18px; }
+.settings-grid { display: grid; grid-template-columns: 300px 1fr; gap: 24px; }
+.action-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+
+.reader { line-height: 1.7; }
+.reader h1, .reader h2, .reader h3 { margin-top: 1.4em; }
+
+.shelf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.shelf-card { display: block; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-decoration: none; color: var(--fg); }
+.shelf-card:hover { border-color: var(--accent); }
+.shelf-card h2 { margin: 0 0 6px; }
+
+.thumbs { display: inline-flex; gap: 4px; }
+.thumbs img { height: 36px; width: 36px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); }
+
+button.danger { color: var(--error); border-color: var(--error); }
+button.danger:hover { border-color: var(--error); }
+/* .button exists for <a> links to look like buttons; <button> elements get
+   their style from the base rule above — do NOT double-pad (that made the
+   top Story buttons look different from the chapter ones). */
+.button { display: inline-block; text-decoration: none; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+a.button { padding: 7px 10px; }
+
+/* action toolbar (story page + AI monitor): one row, wraps on narrow,
+   groups separated by a rule, danger pushed to the end */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.toolbar .sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+.toolbar .spacer { flex: 1 1 0; }
+
+/* word-count hint (FR-2): sits next to the Generate buttons */
+.toolbar .word-hint-label { color: var(--fg-muted); margin: 0; }
+.toolbar select { min-width: 13em; }
+
+/* chapter preview overlay (FR-3): a Shelf-style reading panel on top of the
+   story page */
+.preview-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(8, 10, 13, 0.75);
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 4vh 16px; overflow-y: auto;
+}
+/* the [hidden] attribute must win over display:flex above (both are one
+   selector; source order decides) — otherwise Close/Escape set .hidden=true
+   and the overlay stays on screen */
+.preview-overlay[hidden] { display: none; }
+.preview-panel {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px 28px; max-width: 760px; width: 100%;
+}
+.preview-toolbar {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; margin-bottom: 12px;
+}
+.preview-toolbar .button { padding: 6px 12px; }
+
+/* chapter prev/next nav in the Shelf reader (FR-5) */
+.chapter-nav { display: flex; align-items: center; gap: 8px; margin: 14px 0; }
+.chapter-nav .spacer { flex: 1 1 0; }
+.chapter-nav-btn {
+  color: var(--fg); text-decoration: none;
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chapter-nav-btn:hover { color: var(--accent); border-color: var(--accent); }
+.shelf-chapters summary { cursor: pointer; color: var(--fg); }
+.shelf-chapters { margin-bottom: 8px; }
+
+/* AI stop button (FR-6) */
+.stop-btn { padding: 4px 12px; font-weight: 700; }
+.stop-btn:hover { border-color: var(--error); }
+.stop-btn:disabled { opacity: 0.5; cursor: default; }
+.writing .stop-btn { margin-left: 10px; }
+.active-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+
+/* model "thinking" pane (FR-7): reasoning tokens, shown distinctly from the
+   chapter text — only visible when the server emits reasoning_content */
+.thinking-pane {
+  background: #101216;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+  font-style: italic;
+  min-height: 0; max-height: 30vh; overflow-y: auto;
+}
+
+/* ---------- mobile (FR-1): below ~860px the side navbar would squeeze the
+   content; collapse the frame to a top bar + full-width single column ---- */
+@media (max-width: 860px) {
+  .frame { flex-direction: column; }
+  .navbar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 8px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .navbar a { padding: 5px 9px; font-size: 0.9rem; }
+  .nav-sep { display: none; }
+  .ai-badge { margin-left: auto; font-size: 0.78rem; padding: 3px 6px; }
+  .nav-logout { margin-top: 0; }
+  .nav-logout button { padding: 5px 9px; width: auto; }
+  .content { padding: 14px 14px 40px; max-width: none; }
+  h1 { font-size: 1.25rem; }
+  .story-grid, .settings-grid, .ai-grid { grid-template-columns: 1fr; gap: 14px; }
+  .preview-overlay { padding: 2vh 10px; }
+  .preview-panel { padding: 14px 16px; }
+  .chapter-nav-btn { max-width: 90%; }
+  .toolbar { gap: 6px; }
+  .toolbar select, .toolbar .word-hint-label { width: 100%; }
+  textarea { min-height: 10em; }
+}

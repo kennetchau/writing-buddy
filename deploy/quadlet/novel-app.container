@@ -1,0 +1,58 @@
+# novel-app — the Node.js + TypeScript app (backend doc §6).
+#
+# Built from THIS repo: `podman build -f deploy/Dockerfile -t novel-app:latest .`
+# (deploy/install-quadlet.sh does it).
+#
+# Llama reachability (verified by the old build on this host):
+#   http://host.containers.internal:21000/v1
+# podman injects that name into every container's /etc/hosts, so it is
+# stable across pasta/netns churn. The old build's UNSTABLE alternative was
+# the pasta netns gateway IP (10.2.0.2) — do NOT use it. If llama.cpp ever
+# moves, edit LLAMA_URL below + daemon-reload + restart.
+#
+# First-admin bootstrap: ADMIN_USERNAME/ADMIN_PASSWORD are consumed ONLY
+# while the user table is empty (src/auth/bootstrap.ts). Change the admin
+# password right after first login (Admin → Users → Reset pw).
+#
+# Quadlet quirks: hard-coded values, no ${VAR} expansion.
+[Unit]
+Description=Novel app (Node + TS + Express)
+Requires=novel-db.service
+After=novel-db.service network-online.target novel.network
+
+[Container]
+Image=novel-app:latest
+Network=novel
+NetworkAlias=novel-app
+# LAN entry point (plain HTTP is acceptable — BRD, LAN-only by network
+# position). Port 9187 as before (check plan/reference/usedport on the
+# host if it collides).
+# MUST be explicit host:container (two numbers). On this host's podman a
+# bare `PublishPort=9187` came back as container-9187 -> RANDOM host port
+# (observed 2026-10-06: Ports=map[9187/tcp:[{0.0.0.0 33811}]]), so the
+# app was alive but host :9187 was refused. Same form as the working
+# llamacpp unit (PublishPort=21000:8080).
+PublishPort=9187:9187
+# Named volume for the flat image dir; podman owns its init so the
+# in-image `node` user (uid 1000) can write it.
+Volume=novel-images:/images
+Environment=DATABASE_URL=postgres://novel:novel@novel-db:5432/novel
+Environment=LLAMA_URL=http://host.containers.internal:21000/v1
+Environment=LLM_READ_TIMEOUT=900
+Environment=IMAGES_DIR=/images
+# HTTPS-only site (nginx terminates TLS): send the Secure cookie flag.
+Environment=COOKIE_SECURE=true
+# issue-autologout capture: log every request w/ cookie state ([req] lines)
+Environment=REQ_LOG=1
+Environment=PORT=9187
+# Replace the value below with a long random string
+# (e.g. `openssl rand -hex 32`) before first install.
+Environment=SESSION_SECRET=CHANGE_ME_to_64_hex_chars_0000000000000000000000000000000000000000000000000000000000
+Environment=ADMIN_USERNAME=admin
+Environment=ADMIN_PASSWORD=CHANGE_ME_on_first_boot
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

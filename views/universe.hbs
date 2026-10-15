@@ -1,0 +1,96 @@
+<h1>Universe</h1>
+
+{{#if error}}<p class="error">{{error}}</p>{{/if}}
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+
+<h2>New universe</h2>
+<form id="new-universe-form" onsubmit="return submitUniverse(event)" style="max-width:420px">
+  <label for="new-name">Name</label>
+  <input id="new-name" name="name" required maxlength="200">
+  <label for="new-desc">Description</label>
+  <input id="new-desc" name="description" maxlength="500">
+  <p><button type="submit">Create universe</button></p>
+</form>
+
+<h2>Your universes</h2>
+{{#if universes.length}}
+<table id="universe-table">
+  <thead>
+    <tr><th>Name</th><th>Description</th><th>Entries</th><th>Managers</th><th></th></tr>
+  </thead>
+  <tbody>
+  {{#each universes}}
+    <tr data-id="{{id}}">
+      <td>{{name}}</td>
+      <td class="muted">{{#if description}}{{description}}{{/if}}</td>
+      <td><a href="/lore/universe/{{id}}">{{entry_count}}</a></td>
+      <td id="users-{{id}}">{{#each users}}{{#unless @first}}, {{/unless}}{{username}}{{/each}}</td>
+      <td class="row-actions">
+        <button onclick="deleteUniverse({{id}}, this)">Delete</button>
+        {{#if isAdmin}}<button onclick="toggleAssign(this)">Assign user</button>{{/if}}
+      </td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+{{else}}
+<p class="muted">No universes yet. Create one above.</p>
+{{/if}}
+
+{{#if isAdmin}}
+<template id="assign-user-template">
+  <form onsubmit="return assignUser(event)" style="display:flex;gap:6px;align-items:center">
+    <select name="userId" required>{{#each allUsers}}<option value="{{id}}">{{username}}</option>{{/each}}</select>
+    <button type="submit">Assign</button>
+    <button type="button" onclick="toggleAssign(this)">✕</button>
+  </form>
+</template>
+{{/if}}
+
+<script>
+  function submitUniverse(ev) {
+    ev.preventDefault();
+    const f = ev.target;
+    fetch("/api/universes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: f.name.value, description: f.description.value }),
+    })
+      .then((r) => r.ok ? location.reload() : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+    return false;
+  }
+  function deleteUniverse(id, btn) {
+    if (!confirm("Delete this universe? Only works if it has no entries.")) return;
+    fetch(`/api/universes/${id}/delete`, { method: "POST" })
+      .then((r) => {
+        if (r.status === 409) return r.json().then((j) => alert(`Cannot delete: ${j.entry_count} entr${j.entry_count === 1 ? "y" : "ies"} inside.`));
+        if (!r.ok) return r.json().then((j) => alert(j.error ?? "error"));
+        location.reload();
+      })
+      .catch(() => alert("network error"));
+  }
+  function toggleAssign(btn) {
+    const tr = btn.closest("tr");
+    const cell = tr.querySelector(".row-actions");
+    const existing = cell.querySelector("form");
+    if (existing) { existing.remove(); return; }
+    const tpl = document.getElementById("assign-user-template");
+    const form = tpl.content.firstElementChild.cloneNode(true);
+    cell.appendChild(form);
+    form.userId.value = btn.dataset.userId ?? "";
+  }
+  function assignUser(ev) {
+    ev.preventDefault();
+    const f = ev.target;
+    const id = f.closest("tr").dataset.id;
+    fetch(`/api/universes/${id}/users`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: Number(f.userId.value) }),
+    })
+      .then((r) => r.ok ? location.reload() : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+    return false;
+  }
+</script>

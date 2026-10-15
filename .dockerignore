@@ -1,0 +1,9 @@
+# keep the docker build context small
+node_modules
+dist
+reference
+agent
+tests
+.git
+*.log
+.harness

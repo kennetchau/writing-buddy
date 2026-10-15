@@ -1,0 +1,21 @@
+# novel — shared podman network for the novel app + its database.
+# No [Unit] section: `network.target` is system-scope and does not exist in
+# user systemd, where these quadlets run (same pattern as the old build's
+# baseos.network). The container units order themselves after novel.network.
+#
+# Fixed subnet is NOT required here (containers resolve by name/alias via
+# CNI DNS: novel-db, novel-app). Subnet omitted so podman picks one that
+# does not collide with existing host networks (old-build lesson: check
+# `podman network ls` on the host before changing this).
+#
+# HOST QUIRK (observed 2026-10-06 on the deploy host): on some podman versions the
+# user-systemd generator does NOT surface .network files as units —
+# `novel-db`/`novel-app` generate fine but `novel.network.service` is
+# "not found". deploy/install-quadlet.sh handles both cases: it starts the
+# quadlet unit when present, otherwise creates the network via
+# `podman network create --subnet=10.91.0.0/24 --gateway=10.91.0.1 novel`
+# (subnet chosen to avoid the host's 10.88/16, 10.89.x, 10.90.x — see
+# reference/story_creator/plan/reference/usedport).
+[Network]
+NetworkName=novel
+Driver=bridge

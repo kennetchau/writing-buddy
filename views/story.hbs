@@ -1,0 +1,70 @@
+<h1>Story</h1>
+
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+
+<p><a href="#" class="button" onclick="openNewStory();return false">+ New story</a></p>
+
+<div id="new-story" hidden style="max-width:420px;margin-bottom:24px">
+  <form onsubmit="return createStory(event)">
+    <label for="ns-title">Title</label>
+    <input id="ns-title" name="title" required maxlength="200">
+    <label for="ns-universe">Primary universe (the world the story takes place in)</label>
+    <select id="ns-universe" name="universe_id">
+      <option value="">(original world)</option>
+      {{#each universes}}<option value="{{id}}">{{name}}</option>{{/each}}
+    </select>
+    <p>
+      <button type="submit">Create</button>
+      <button type="button" onclick="document.getElementById('new-story').hidden=true">Cancel</button>
+    </p>
+  </form>
+</div>
+
+{{#if stories.length}}
+<table>
+  <thead>
+    <tr><th>Title</th><th>World</th><th>Chapters</th><th>Status</th><th>Updated</th><th></th></tr>
+  </thead>
+  <tbody>
+  {{#each stories}}
+    <tr>
+      <td><a href="/story/{{id}}">{{title}}</a></td>
+      <td>{{#if universe_name}}{{universe_name}}{{else}}<span class="muted">original world</span>{{/if}}</td>
+      <td class="muted">{{chapter_count}}</td>
+      <td><span class="badge {{status}}">{{status}}</span></td>
+      <td class="muted">{{formatDate updated_at}}</td>
+      <td><button class="danger" onclick="deleteStory({{id}}, '{{title}}')">Delete</button></td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+{{else}}
+<p class="muted">No stories yet. Create one above.</p>
+{{/if}}
+
+<script>
+  function openNewStory() {
+    const el = document.getElementById("new-story");
+    el.hidden = !el.hidden;
+    if (!el.hidden) el.querySelector("#ns-title").focus();
+  }
+  function createStory(ev) {
+    ev.preventDefault();
+    const f = ev.target;
+    const body = { title: f.title.value };
+    if (f.universe_id.value) body.universe_id = Number(f.universe_id.value);
+    fetch("/api/stories/0", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .then(async (r) => {
+        if (r.ok) { const { id } = await r.json(); location.href = "/story/" + id; }
+        else alert((await r.json()).error);
+      })
+      .catch(() => alert("network error"));
+    return false;
+  }
+  function deleteStory(id, title) {
+    if (!confirm(`Delete story "${title}" and all its chapters?`)) return;
+    fetch(`/api/stories/${id}/delete`, { method: "POST" })
+      .then((r) => r.ok ? location.reload() : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+  }
+</script>

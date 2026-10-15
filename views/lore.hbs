@@ -1,0 +1,127 @@
+<h1>Lore</h1>
+
+{{#if error}}<p class="error">{{error}}</p>{{/if}}
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+
+<p class="muted">Pick a universe to browse its entries. Manage universes on the <a href="/universe">Universe</a> page.</p>
+
+{{#if universes.length}}
+<table>
+  <thead>
+    <tr><th>Universe</th><th>Entries</th><th>Created</th></tr>
+  </thead>
+  <tbody>
+  {{#each universes}}
+    <tr>
+      <td><a href="/lore/universe/{{id}}">{{name}}</a></td>
+      <td><a href="/lore/universe/{{id}}">{{entry_count}}</a></td>
+      <td class="muted">{{#if description}}{{description}}{{/if}}</td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+{{else}}
+<p class="muted">No universes yet. <a href="/universe">Create one</a>.</p>
+{{/if}}
+
+<h2>AI lore suggestion</h2>
+<p class="muted">
+  Propose lore changes based on a story so far (additions apply directly;
+  deletions ask for confirmation). The same button lives on the Story page.
+</p>
+<form onsubmit="return startLoreSuggest(event)" style="max-width:420px">
+  <label for="ls-story">Story</label>
+  <select id="ls-story" name="story_id" required>
+    <option value="">— choose a story —</option>
+    {{#each stories}}<option value="{{id}}">{{title}}</option>{{/each}}
+  </select>
+  <p><button type="submit">Suggest</button></p>
+</form>
+<div id="ls-pane" hidden>
+  <h3>Proposed lore changes</h3>
+  <div id="ls-stream" class="stream-pane" hidden></div>
+  <ul id="ls-list"></ul>
+</div>
+
+<script>
+  let suggestions = [];
+  function startLoreSuggest(ev) {
+    ev.preventDefault();
+    const sid = document.getElementById("ls-story").value;
+    if (!sid) return false;
+    const pane = document.getElementById("ls-pane");
+    pane.hidden = false;
+    const stream = document.getElementById("ls-stream");
+    stream.hidden = false;
+    stream.textContent = "requesting suggestions…\n";
+    document.getElementById("ls-list").innerHTML = "";
+    fetch("/api/ai/lore-suggest", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ story_id: Number(sid) }),
+    })
+      .then((r) => r.ok ? r.json() : r.json().then((j) => { throw new Error(j.error ?? "failed"); }))
+      .then((j) => subscribe(`/api/ai/runs/${j.run.id}/stream`))
+      .then((events) => {
+        const done = events.find((e) => e.type === "done");
+        const err = events.find((e) => e.type === "error");
+        if (err) { stream.textContent += `\n[error] ${err.message}`; return; }
+        suggestions = (done && done.suggestions) || [];
+        renderLsList();
+      })
+      .catch((e) => { stream.textContent += `\n[error] ${e.message}`; });
+    return false;
+  }
+  function subscribe(url) {
+    return fetch(url, { headers: { accept: "text/event-stream" } }).then(async (res) => {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const events = [];
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const evt = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const line = evt.split("\n").find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          let msg; try { msg = JSON.parse(line.slice(5)); } catch { continue; }
+          events.push(msg);
+          if (msg.type === "delta") {
+            document.getElementById("ls-stream").textContent += msg.text ?? "";
+          }
+        }
+      }
+      return events;
+    });
+  }
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+  function renderLsList() {
+    const ul = document.getElementById("ls-list");
+    ul.innerHTML = suggestions.length ? suggestions.map((s, i) =>
+      `<li><strong>${s.type === "add" ? "➕ Add" : "🗑 Delete"}</strong>
+       <strong>${esc(s.title)}</strong> in <em>${esc(s.universe)}</em>
+       <div class="muted">${esc(s.reason)}</div>
+       ${s.type === "add" ? `<div>${esc(s.body_md)}</div>` : ""}
+       <button onclick="applyLs(${i})">${s.type === "add" ? "Apply" : "Confirm delete"}</button></li>`
+    ).join("") : '<li class="muted">No suggestions returned.</li>';
+  }
+  function applyLs(i) {
+    const s = suggestions[i];
+    if (!s) return;
+    if (s.type === "delete" && !confirm(`Delete lore entry "${s.title}" from ${s.universe}?`)) return;
+    fetch("/api/ai/lore-suggest/apply", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: s.type, universe: s.universe, title: s.title, body_md: s.body_md, confirmed: true }),
+    })
+      .then((r) => r.json())
+      .then((j) => j.ok ? location.reload() : alert(j.error ?? "apply failed"))
+      .catch(() => alert("network error"));
+  }
+</script>

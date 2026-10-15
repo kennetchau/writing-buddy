@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{appTitle}}</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="frame">
+    <div id="auth-lost" class="error" hidden></div>
+    {{#if user}}
+    <nav class="navbar">
+      <a href="/story" class="{{#if (eq activeNav 'story')}}active{{/if}}">Story</a>
+      <a href="/lore" class="{{#if (eq activeNav 'lore')}}active{{/if}}">Lore</a>
+      <a href="/universe" class="{{#if (eq activeNav 'universe')}}active{{/if}}">Universe</a>
+      <a href="/ai" class="{{#if (eq activeNav 'ai')}}active{{/if}}">AI Monitor</a>
+      <a href="/shelf" class="{{#if (eq activeNav 'shelf')}}active{{/if}}">Shelf</a>
+      <div class="nav-sep"></div>
+      <a id="ai-badge" class="ai-badge" href="/ai" hidden>
+        <span class="ai-badge-spinner" aria-hidden="true"></span>
+        <span id="ai-badge-label">AI working…</span>
+      </a>
+      {{#if user.is_admin}}
+      <a href="/admin/users">⚙ Admin</a>
+      {{/if}}
+      <form method="post" action="/logout" class="nav-logout">
+        <button type="submit">{{user.username}} ▾</button>
+      </form>
+    </nav>
+    {{else}}
+    <nav class="navbar"></nav>
+    {{/if}}
+    <main class="content">
+      {{{body}}}
+    </main>
+  </div>
+  {{#if user}}
+  <script src="/js/app.js" defer></script>
+  {{/if}}
+</body>
+</html>

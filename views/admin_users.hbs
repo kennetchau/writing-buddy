@@ -1,0 +1,96 @@
+<h1>Admin — Users</h1>
+
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+{{#if error}}<p class="error">{{error}}</p>{{/if}}
+
+<h2>Change my password</h2>
+<form onsubmit="return changeMyPassword(event)" style="max-width:420px">
+  <label for="cp-current">Current password</label>
+  <input id="cp-current" name="current" type="password" required>
+  <label for="cp-next">New password (min 6 chars)</label>
+  <input id="cp-next" name="next" type="password" required minlength="6">
+  <p><button type="submit">Change my password</button></p>
+</form>
+
+<h2>Add user</h2>
+<form onsubmit="return addUser(event)" style="max-width:420px">
+  <label for="nu-username">Username</label>
+  <input id="nu-username" name="username" required pattern="[a-zA-Z0-9_.\-]{3,50}" title="3-50 chars">
+  <label for="nu-password">Temporary password</label>
+  <input id="nu-password" name="password" type="text" required minlength="6">
+  <p><button type="submit">Create user</button></p>
+</form>
+
+<h2>Users</h2>
+<table>
+  <thead>
+    <tr><th>Username</th><th>Admin</th><th>Created</th><th></th></tr>
+  </thead>
+  <tbody>
+  {{#each users}}
+    <tr data-id="{{id}}" data-username="{{username}}">
+      <td>{{username}}{{#if (eq id currentUser)}} <span class="muted">(you)</span>{{/if}}</td>
+      <td id="adm-{{id}}">{{#if is_admin}}yes{{else}}no{{/if}}</td>
+      <td class="muted">{{formatDate created_at}}</td>
+      <td>
+        <button onclick="resetPassword(this)">Reset pw</button>
+        <button onclick="toggleAdmin(this)">Toggle admin</button>
+        <button class="danger" onclick="deleteUser(this)">Delete</button>
+      </td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+
+<script>
+  const ME = {{currentUser}};
+  function api(path, body) {
+    return fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error ?? r.status); return j; });
+  }
+  function addUser(ev) {
+    ev.preventDefault();
+    const f = ev.target;
+    api("/api/admin/users", { username: f.username.value, password: f.password.value })
+      .then(() => location.reload())
+      .catch((e) => alert(e.message));
+    return false;
+  }
+  function changeMyPassword(ev) {
+    ev.preventDefault();
+    const f = ev.target;
+    api("/api/auth/change-password", { current: f.current.value, next: f.next.value })
+      .then(() => { f.reset(); alert("Password changed."); })
+      .catch((e) => alert(e.message));
+    return false;
+  }
+  function rowOf(btn) { return btn.closest("tr"); }
+  function resetPassword(btn) {
+    const tr = rowOf(btn);
+    if (Number(tr.dataset.id) === ME) { alert("Use the “Change my password” form on this page."); return; }
+    const pw = prompt(`New password for ${tr.dataset.username} (min 6 chars):`);
+    if (pw === null) return;
+    api(`/api/admin/users/${tr.dataset.id}/reset-password`, { password: pw })
+      .then(() => alert("Password reset."))
+      .catch((e) => alert(e.message));
+  }
+  function toggleAdmin(btn) {
+    const tr = rowOf(btn);
+    if (Number(tr.dataset.id) === ME) { alert("You cannot change your own admin flag."); return; }
+    api(`/api/admin/users/${tr.dataset.id}/toggle-admin`, {})
+      .then(() => location.reload())
+      .catch((e) => alert(e.message));
+  }
+  function deleteUser(btn) {
+    const tr = rowOf(btn);
+    const name = tr.dataset.username;
+    if (Number(tr.dataset.id) === ME) { alert("You cannot delete your own account."); return; }
+    // typed-username confirm (the only typed confirm in the app, frontend doc §3.6)
+    const typed = prompt(`Deleting ${name} removes ALL their content (universes, lore, images, stories, chapters). Type the username to confirm:`);
+    if (typed === null) return;
+    if (typed !== name) { alert("Username did not match — nothing deleted."); return; }
+    api(`/api/admin/users/${tr.dataset.id}/delete`, { confirm: name })
+      .then(() => location.reload())
+      .catch((e) => alert(e.message));
+  }
+</script>

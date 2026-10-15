@@ -1,0 +1,16 @@
+<h1>Shelf</h1>
+
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+
+{{#if stories.length}}
+<div class="shelf-grid">
+  {{#each stories}}
+  <a class="shelf-card" href="/shelf/{{id}}">
+    <h2>{{title}}</h2>
+    <p class="muted">{{chapter_count}} chapter{{#unless (eq chapter_count 1)}}s{{/unless}}</p>
+  </a>
+  {{/each}}
+</div>
+{{else}}
+<p class="muted">Nothing on the shelf yet. Finalize a story to read it here.</p>
+{{/if}}

@@ -1,0 +1,28 @@
+# novel-db — PostgreSQL 16 for the novel app (backend doc §6).
+# Network-only: NO PublishPort (reachable as `novel-db` on the novel net).
+# Data lives in the named volume `novel-pgdata` (survives container
+# recreation; podman initializes its ownership from the image's postgres
+# uid, so no :z / chown dance is needed for named volumes).
+#
+# Quadlet generator quirks (old build CP-1): NO ${VAR} expansion, NO
+# ExtraHosts — everything below is hard-coded. Edit here, then
+# `systemctl --user daemon-reload && systemctl --user restart novel-db`.
+[Unit]
+Description=Novel app PostgreSQL 16
+After=network-online.target novel.network
+
+[Container]
+# Fully qualified: the host enforces short-name-mode=strict (no TTY prompt).
+Image=docker.io/library/postgres:16
+Network=novel
+NetworkAlias=novel-db
+Volume=novel-pgdata:/var/lib/postgresql/data
+Environment=POSTGRES_USER=novel
+Environment=POSTGRES_PASSWORD=novel
+Environment=POSTGRES_DB=novel
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

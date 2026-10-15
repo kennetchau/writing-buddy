@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022", "DOM"],
+    "outDir": "dist",
+    "rootDir": ".",
+    "rootDirs": ["src", "tests"],
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "declaration": false,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  // CR round 3: the story-page editor is bundled by esbuild (build:js), not
+  // compiled by tsc (CM6 is pure-ESM with many internal imports); the client
+  // regression test drives that ESM entry under vitest/jsdom and is not
+  // type-checked by tsc
+  "exclude": ["node_modules", "dist", "src/public/js/story.ts", "tests/client-story-editor.spec.ts"]
+}

@@ -1,0 +1,525 @@
+<h1>AI Monitor</h1>
+
+<div class="ai-grid">
+  <div class="ai-card">
+    <h2>Models</h2>
+    <div id="model-status" class="muted" hidden></div>
+    <ul id="model-list" class="model-list">
+      {{#each models}}
+      <li class="model-row {{#if (eq id ../loadedId)}}is-loaded{{/if}}" data-model="{{id}}">
+        <div class="model-info">
+          <span class="model-name">{{id}}</span>
+          <span class="model-meta">{{#if multimodal}}vision{{/if}}</span>
+        </div>
+        <button class="switch" role="switch"
+                aria-checked="{{#if (eq id ../loadedId)}}true{{else}}false{{/if}}"
+                aria-label="Load or unload {{id}}" data-model="{{id}}">
+          <span class="knob"></span>
+        </button>
+      </li>
+      {{/each}}
+    </ul>
+    {{#unless reachable}}
+    <p class="error">Model server unreachable — the app still works for writing/editing. AI buttons will fail until llama.cpp is up.</p>
+    {{/unless}}
+    {{#if reachable}}
+    {{#unless models.length}}
+    <p class="muted">No models registered with the router.</p>
+    {{/unless}}
+    {{/if}}
+    <p class="muted">Flip a switch to load a model; flipping the loaded one off unloads it. Only one model runs at a time, so switching unloads the other first.</p>
+  </div>
+
+  <div class="ai-card">
+    <h2>Active action</h2>
+    <div class="active-head">
+      <div id="active-status" class="muted">idle</div>
+      <button id="active-stop" class="danger stop-btn" onclick="stopActiveRun()" hidden>■ Stop</button>
+    </div>
+    <div id="active-thinking" class="thinking-pane" hidden></div>
+    <div id="active-stream" class="stream-pane" hidden></div>
+    <p class="muted">The running action streams here (re-subscribable). While an action runs, the navbar badge updates everywhere. The <em>thinking</em> pane (above the output) shows the model's reasoning tokens when the server is run with reasoning extraction (e.g. <code>--reasoning-format deepseek</code>). <strong>■ Stop</strong> cancels the running action.</p>
+  </div>
+</div>
+
+<h2>System prompts</h2>
+<p class="muted">One editable prompt per AI action. No versioning.</p>
+<div id="prompt-tabs" class="prompt-tabs">
+  {{#each prompts}}
+  <button class="tab" data-action="{{action}}">{{labelFor action}}</button>
+  {{/each}}
+</div>
+<div id="prompt-edit">
+  <label for="prompt-text">Prompt ({{promptAction}})</label>
+  <textarea id="prompt-text" rows="12">{{promptText}}</textarea>
+  <p><button id="prompt-save">Save prompt</button></p>
+</div>
+
+<h2>Style prompts (skills)</h2>
+<p class="muted">
+  Define how you want the AI to write — e.g. "third person, short punchy sentences, dark humor".
+  Save as many as you like; on the story page you pick one (or none) next to the Length hint and
+  it is injected into the generate system prompt for that run.
+</p>
+<div id="style-list">
+  {{#each styles}}
+  <div class="style-item" data-id="{{id}}">
+    <div class="style-head">
+      <input class="style-name" value="{{name}}" maxlength="100" aria-label="Style name">
+      <span class="style-actions">
+        <button class="style-save" onclick="saveStyle(this)">Save</button>
+        <button class="style-del danger" onclick="deleteStyle(this)">Delete</button>
+      </span>
+    </div>
+    <textarea class="style-text" rows="5" aria-label="Style text">{{text_md}}</textarea>
+  </div>
+  {{/each}}
+  {{#unless styles.length}}
+  <p class="muted" id="style-empty">No styles yet — add your first one below.</p>
+  {{/unless}}
+</div>
+<form id="style-new" onsubmit="return addStyle(event)">
+  <div class="style-head">
+    <input id="style-new-name" maxlength="100" placeholder="New style name (e.g. Noir)" required aria-label="New style name">
+  </div>
+  <textarea id="style-new-text" rows="5" required placeholder="How should the AI write in this style?"></textarea>
+  <p><button type="submit">+ Add style</button></p>
+</form>
+
+<script>
+  const PROMPTS = {{{promptsJson}}};
+  let currentAction = null;
+  let activeRunId = null;
+
+  const LABELS = {
+    generate: "Generate chapter",
+    summarize: "Summarize",
+    lore_suggest: "Lore suggest",
+    image_desc: "Image description",
+    style_extract: "Extract style",
+  };
+
+  // ---- model card (T4.2): vertical list + one toggle switch per model ----
+  // A switch sits to the right of each model name; its position IS the load
+  // state (on = loaded, off = unloaded, pulsing = loading/unloading). The
+  // 5s poll + the transition poll keep every switch synced to the router.
+  let loadedModelId = null;   // updated by refreshModel from /api/model
+  const statusLine = () => document.getElementById("model-status");
+  const rowFor = (id) => document.querySelector(`.model-row[data-model="${CSS.escape(id)}"]`);
+
+  // paint each row from a /api/model response
+  function paintModels(models, loaded) {
+    for (const m of models) {
+      const row = rowFor(m.id);
+      if (!row) continue;
+      const busy = m.status === "loading" || m.status === "unloading";
+      row.classList.toggle("is-loaded", m.id === loaded);
+      row.classList.toggle("is-busy", busy);
+      row.classList.toggle("is-disabled", busy);
+      const sw = row.querySelector(".switch");
+      if (sw) {
+        sw.setAttribute("aria-checked", m.id === loaded ? "true" : "false");
+        sw.disabled = busy;
+      }
+      const meta = row.querySelector(".model-meta");
+      if (meta) {
+        const parts = [];
+        if (m.multimodal) parts.push("vision");
+        if (m.ctx) parts.push(`${Math.round(m.ctx / 1000)}k ctx`);
+        if (busy) parts.push(m.status);
+        meta.textContent = parts.join(" · ");
+      }
+    }
+  }
+
+  async function refreshModel() {
+    try {
+      const res = await fetch("/api/model");
+      const j = await res.json();
+      const el = statusLine();
+      if (!j.reachable) { el.hidden = false; el.textContent = "model server unreachable"; return; }
+      if (!j.models.length) { el.hidden = false; el.textContent = "no models registered"; return; }
+      el.hidden = true;
+      loadedModelId = j.loaded ? j.loaded.id : null;
+      paintModels(j.models, loadedModelId);
+    } catch { /* ignore — keep last paint */ }
+  }
+
+  function toggleModel(ev) {
+    const model = ev.currentTarget.dataset.model;
+    // already the loaded one -> unload it
+    if (model === loadedModelId) {
+      post("unload", model)
+        .then(() => pollUntil(() => loadedModelId !== model))
+        .catch(() => alert("unload failed"));
+      return;
+    }
+    // load it (switching away from whatever is loaded — unload that first,
+    // since only one model runs at a time)
+    const before = loadedModelId ? post("unload", loadedModelId) : Promise.resolve();
+    before.then(() => post("load", model))
+      .then(() => pollUntil(() => loadedModelId === model))
+      .catch(() => alert("load failed"));
+  }
+
+  // poll the model state until the condition holds (or ~3 min gives up)
+  function pollUntil(ok) {
+    return new Promise((resolve) => {
+      let tries = 0;
+      const iv = setInterval(async () => {
+        await refreshModel();
+        if (ok() || ++tries > 90) { clearInterval(iv); resolve(); }
+      }, 2000);
+    });
+  }
+
+  const post = (kind, m) =>
+    fetch(`/api/model/${kind}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: m }) })
+      .then((r) => r.json());
+
+  document.querySelectorAll(".model-row").forEach((row) =>
+    row.querySelector(".switch").addEventListener("click", toggleModel));
+  refreshModel();
+  setInterval(refreshModel, 5000);
+
+  // ---- active action card: poll /api/ai/current, subscribe to stream ----
+  // Shows the running action AND its outcome: once a run finishes,
+  // /api/ai/current stops returning `run` but returns `last` (the most
+  // recent run, any status, from the DB) — the card flips to
+  // "✓ … finished" / "✗ … failed" instead of snapping to "idle" and
+  // hiding the stream (change request 2026-10-15), and the outcome
+  // survives a page reload.
+  let lastTerminal = null; // { id, kind, status, error, ended_at } last shown
+  async function refreshActive() {
+    try {
+      const res = await fetch("/api/ai/current");
+      const j = await res.json();
+      const status = document.getElementById("active-status");
+      const pane = document.getElementById("active-stream");
+      const thinkPane = document.getElementById("active-thinking");
+      const stopBtn = document.getElementById("active-stop");
+      if (!j.run) {
+        stopBtn.hidden = true;
+        const last = j.last && j.last.status !== "running" ? j.last : null;
+        if (activeRunId !== null && last && last.id === activeRunId) {
+          // a run WE were streaming just finished — keep the pane (its
+          // "— done" / "[error]" tail is already in it), flip the status
+          activeRunId = null;
+          lastTerminal = last;
+          paintFinished(last, { keepPane: true });
+          // a finished extract-style run auto-saved a NEW skill — the Style
+          // prompts section is server-rendered, so pull it in without a
+          // manual page refresh (change request 2026-10-15 follow-up)
+          if (last.kind === "style_extract" && last.status !== "error") refreshStyles();
+        } else if (last && (!lastTerminal || lastTerminal.id !== last.id)) {
+          // fresh page / a newer terminal run — show its outcome again
+          lastTerminal = last;
+          paintFinished(last, { keepPane: false });
+        } else {
+          // truly idle (nothing has ever run, or state already shown)
+          if (!lastTerminal) {
+            status.textContent = "idle";
+            status.className = "muted";
+            pane.hidden = true;
+            thinkPane.hidden = true;
+          }
+        }
+        return;
+      }
+      lastTerminal = null; // a new run is live — drop any finished state
+      const where = j.run.title ? ` — “${j.run.title}”` : "";
+      status.textContent = `${LABELS[j.run.kind] ?? j.run.kind}${where} — started ${new Date(j.run.started_at).toLocaleTimeString()}`;
+      status.className = "muted";
+      stopBtn.hidden = false; // FR-6: red emergency-stop while an action runs
+      if (activeRunId !== j.run.id) {
+        activeRunId = j.run.id;
+        pane.hidden = false;
+        pane.textContent = "";
+        thinkPane.hidden = false;
+        thinkPane.textContent = "";
+        subscribeStream(`/api/ai/runs/${j.run.id}/stream`, pane);
+      }
+    } catch { /* ignore */ }
+  }
+  /** Paint a finished run: ✓/✗ status line (+ why, for failures). With
+   *  keepPane the live stream pane is kept as-is (we watched the run end);
+   *  without it the pane only re-appears to show the failure reason
+   *  (after a reload there is no streamed output to show). */
+  function paintFinished(last, opts) {
+    const status = document.getElementById("active-status");
+    const pane = document.getElementById("active-stream");
+    const thinkPane = document.getElementById("active-thinking");
+    const label = LABELS[last.kind] ?? last.kind;
+    const at = last.ended_at ? ` — ${new Date(last.ended_at).toLocaleTimeString()}` : "";
+    const ok = last.status !== "error";
+    status.className = ok ? "ok-status" : "error-status";
+    status.textContent = `${ok ? "✓" : "✗"} ${label} ${ok ? "finished" : "failed"}${at}`;
+    if (!ok && last.error) {
+      status.title = last.error;
+      if (opts.keepPane && (pane.textContent ?? "").includes("[error]")) {
+        /* the stream tail already shows it */
+      } else {
+        pane.hidden = false;
+        pane.textContent = opts.keepPane
+          ? `${pane.textContent}\n[error] ${last.error}`
+          : `[${label}] failed: ${last.error}`;
+      }
+    } else if (!opts.keepPane) {
+      pane.hidden = true;
+      thinkPane.hidden = true;
+    }
+  }
+  /** FR-6: cancel the running AI action (the run fails with "cancelled by
+   *  user"; the stream ends with an error event and the page unlocks). */
+  async function stopActiveRun() {
+    if (activeRunId === null) return;
+    if (!confirm("Stop the AI? The current action will be cancelled — any partial output is discarded.")) return;
+    const btn = document.getElementById("active-stop");
+    btn.disabled = true;
+    btn.textContent = "stopping…";
+    try {
+      const res = await fetch(`/api/ai/runs/${activeRunId}/cancel`, { method: "POST" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error ?? "stop failed");
+      }
+    } catch (e) {
+      alert(`stop failed: ${e.message}`);
+    }
+    btn.disabled = false;
+    btn.textContent = "■ Stop";
+  }
+  function subscribeStream(url, target) {
+    return fetch(url, { headers: { accept: "text/event-stream" } }).then(async (res) => {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const thinkPane = document.getElementById("active-thinking");
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const evt = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLine = evt.split("\n").find((l) => l.startsWith("data:"));
+          if (!dataLine) continue;
+          let msg; try { msg = JSON.parse(dataLine.slice(5)); } catch { continue; }
+          if (msg.type === "delta") target.textContent += msg.text ?? "";
+          else if (msg.type === "thinking") target.textContent += `\n…${msg.message}`;
+          else if (msg.type === "thought") {
+            // FR-7: model reasoning tokens (llama.cpp reasoning_content) —
+            // only arrives when the server extracts thinking
+            thinkPane.textContent += msg.text ?? "";
+          }
+          else if (msg.type === "done") target.textContent += "\n— done";
+          else if (msg.type === "error") target.textContent += `\n[error] ${msg.message}`;
+        }
+      }
+    });
+  }
+  refreshActive();
+  setInterval(refreshActive, 5000);
+
+  // ---- system prompts (T4.4): tabs + save ----
+  const PROMPT_LABELS = {
+    generate: "Generate chapter",
+    generate_this: "Generate this chapter",
+    summarize: "Summarize",
+    lore_suggest: "Lore suggest",
+    image_desc: "Image description",
+    style_extract: "Extract style",
+  };
+  function showPrompt(action) {
+    currentAction = action;
+    document.querySelectorAll("#prompt-tabs .tab").forEach((t) =>
+      t.classList.toggle("active", t.dataset.action === action));
+    const p = PROMPTS.find((x) => x.action === action);
+    document.getElementById("prompt-text").value = p ? p.text_md : "";
+    document.querySelector("#prompt-edit label").textContent =
+      `Prompt (${PROMPT_LABELS[action] ?? action})`;
+  }
+  document.querySelectorAll("#prompt-tabs .tab").forEach((t) =>
+    t.addEventListener("click", () => showPrompt(t.dataset.action)));
+  document.getElementById("prompt-save").addEventListener("click", () => {
+    fetch("/api/prompts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: currentAction, text_md: document.getElementById("prompt-text").value }),
+    })
+      .then((r) => r.json())
+      .then((j) => alert(j.ok ? "Prompt saved." : (j.error ?? "failed")));
+  });
+  if (PROMPTS.length) showPrompt(PROMPTS[0].action);
+
+  // ---- style prompts / "skills" (FR round 2, 2026-10-09) ----
+  // Managed here; picked per run from the story page's Style dropdown.
+  const styleList = document.getElementById("style-list");
+  function styleItemData(btn) {
+    const item = btn.closest(".style-item");
+    return {
+      id: Number(item.dataset.id),
+      name: item.querySelector(".style-name").value.trim(),
+      text_md: item.querySelector(".style-text").value,
+    };
+  }
+  function paintStyleEmpty() {
+    let empty = document.getElementById("style-empty");
+    if (!styleList.querySelector(".style-item")) {
+      if (!empty) {
+        empty = document.createElement("p");
+        empty.id = "style-empty";
+        empty.className = "muted";
+        empty.textContent = "No styles yet — add your first one below.";
+        styleList.prepend(empty);
+      }
+    } else if (empty) empty.remove();
+  }
+  // Re-render the Style prompts section from the API (same markup + the same
+  // global save/delete handlers as the server-rendered list). Called when a
+  // style_extract run finishes WHILE the user is on this page — the run
+  // auto-saved a new skill and the server-rendered list does not know yet.
+  function styleItemEl(s) {
+    const item = document.createElement("div");
+    item.className = "style-item";
+    item.dataset.id = String(s.id);
+    const head = document.createElement("div");
+    head.className = "style-head";
+    const name = document.createElement("input");
+    name.className = "style-name";
+    name.value = s.name;
+    name.maxLength = 100;
+    name.setAttribute("aria-label", "Style name");
+    const actions = document.createElement("span");
+    actions.className = "style-actions";
+    const save = document.createElement("button");
+    save.className = "style-save";
+    save.textContent = "Save";
+    save.addEventListener("click", () => saveStyle(save));
+    const del = document.createElement("button");
+    del.className = "style-del danger";
+    del.textContent = "Delete";
+    del.addEventListener("click", () => deleteStyle(del));
+    actions.append(save, del);
+    head.append(name, actions);
+    const ta = document.createElement("textarea");
+    ta.className = "style-text";
+    ta.rows = 5;
+    ta.value = s.text_md;
+    ta.setAttribute("aria-label", "Style text");
+    item.append(head, ta);
+    return item;
+  }
+  async function refreshStyles() {
+    try {
+      const res = await fetch("/api/style-prompts");
+      const j = await res.json();
+      styleList.innerHTML = "";
+      for (const s of j.styles ?? []) styleList.appendChild(styleItemEl(s));
+      paintStyleEmpty();
+    } catch { /* keep the current list */ }
+  }
+  async function addStyle(ev) {
+    ev.preventDefault();
+    const name = document.getElementById("style-new-name").value.trim();
+    const text_md = document.getElementById("style-new-text").value;
+    const res = await fetch("/api/style-prompts/0", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, text_md }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(j.error ?? "failed to add style"); return false; }
+    location.reload();
+    return false;
+  }
+  async function saveStyle(btn) {
+    const s = styleItemData(btn);
+    if (!s.name) { alert("Style name is required."); return; }
+    btn.disabled = true;
+    const res = await fetch(`/api/style-prompts/${s.id}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: s.name, text_md: s.text_md }),
+    });
+    const j = await res.json().catch(() => ({}));
+    btn.disabled = false;
+    if (!res.ok) { alert(j.error ?? "failed to save style"); return; }
+    alert("Style saved.");
+  }
+  async function deleteStyle(btn) {
+    const s = styleItemData(btn);
+    if (!confirm(`Delete the style "${s.name}"?`)) return;
+    btn.disabled = true;
+    const res = await fetch(`/api/style-prompts/${s.id}/delete`, { method: "POST" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error ?? "failed to delete style");
+      btn.disabled = false;
+      return;
+    }
+    btn.closest(".style-item").remove();
+    paintStyleEmpty();
+  }
+</script>
+
+<style>
+  .ai-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 16px 0; }
+  .ai-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .prompt-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .prompt-tabs .tab.active { border-color: var(--accent); color: var(--accent); }
+
+  /* active action outcome (change request 2026-10-15) */
+  .ok-status { color: var(--ok); font-weight: 600; }
+  .error-status { color: var(--error); font-weight: 600; }
+
+  /* model list: one row per model, switch on the right */
+  .model-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .model-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg);
+  }
+  .model-row.is-loaded { border-color: var(--ok); }
+  .model-row.is-busy { opacity: 0.7; }
+  .model-row.is-disabled { pointer-events: none; }
+  .model-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .model-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model-row.is-loaded .model-name { color: var(--ok); }
+  .model-meta { color: var(--fg-muted); font-size: 0.78rem; }
+
+  /* toggle switch */
+  .switch {
+    flex: 0 0 auto; position: relative; width: 44px; height: 24px; padding: 0;
+    background: var(--bg-input); border: 1px solid var(--border); border-radius: 999px;
+    cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .switch .knob {
+    position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    background: var(--fg-muted); border-radius: 50%;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .model-row.is-loaded .switch { background: var(--ok); border-color: var(--ok); }
+  .model-row.is-loaded .switch .knob { transform: translateX(20px); background: #0e1216; }
+  .model-row.is-busy .switch .knob {
+    background: var(--accent);
+    animation: knob-pulse 1s ease-in-out infinite;
+  }
+  @keyframes knob-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .switch:disabled { cursor: default; }
+
+  /* style prompts ("skills") */
+  .style-item {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin: 0 0 12px;
+  }
+  .style-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .style-name {
+    flex: 1 1 auto; min-width: 0; font-weight: 600;
+    background: var(--bg-input); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  }
+  .style-actions { flex: 0 0 auto; display: flex; gap: 6px; }
+  #style-new .style-head { margin-bottom: 8px; }
+</style>

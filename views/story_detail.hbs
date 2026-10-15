@@ -1,0 +1,811 @@
+<h1>
+  {{story.title}}
+  <span class="badge {{story.status}}">{{story.status}}</span>
+  <span id="writing-indicator" class="writing" hidden>✍ the AI is writing this story right now
+    <button id="stop-btn" class="danger stop-btn" onclick="stopAi()" disabled>■ Stop</button>
+  </span>
+  {{#if story.universe_name}}<span class="muted">· World: {{story.universe_name}}</span>{{else}}<span class="muted">· original world</span>{{/if}}
+</h1>
+<p><a href="/story">← stories</a></p>
+
+{{#if error}}<p class="error">{{error}}</p>{{/if}}
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+
+{{#if summarizeHint}}
+<div id="summarize-hint" class="hint">
+  <span>📝 <strong>{{summarizeHint.count}}</strong> chapter(s) have no summary yet — summaries are how the AI remembers the earlier chapters. Do you want to summarize them all now?</span>
+  <span class="hint-actions">
+    <button onclick="summarizeFromHint()">Summarize now</button>
+    <button class="muted" onclick="dismissSummarizeHint()">Not now</button>
+  </span>
+</div>
+{{/if}}
+
+<div class="toolbar">
+  <button onclick="saveOutline()">Save outline</button>
+  <button onclick="runVerify()">Verify</button>
+  <span class="sep"></span>
+  <button class="muted" onclick="toggleSettings()">⚙ Settings</button>
+</div>
+
+<div id="verify-report" hidden></div>
+
+<details id="settings" open="false">
+  <summary>Settings &amp; borrowed lore</summary>
+  <div class="settings-grid">
+    <div>
+      <label for="primary-universe">Primary universe</label>
+      <select id="primary-universe">
+        <option value="">(original world)</option>
+        {{#each universes}}
+          <option value="{{id}}" {{#if (eq id story.universe_id)}}selected{{/if}}>{{name}}</option>
+        {{/each}}
+      </select>
+      <p><button onclick="setPrimaryUniverse()">Save universe</button></p>
+      <hr class="settings-sep">
+      <p>
+        <label class="hint-pref"><input type="checkbox" id="summarize-hint-enabled" {{#if summarizeHintEnabled}}checked{{/if}}>
+        Suggest summarizing chapters</label>
+      </p>
+      <p class="muted">
+        once <input type="number" id="summarize-hint-count" class="num-input" min="1" max="20" value="{{summarizeHintCount}}" aria-label="Number of unsummarized chapters that trigger the hint">
+        chapter(s) lack a summary (turn the suggestion off above to never see it)
+      </p>
+      <p><button onclick="saveHintSettings()">Save hints</button></p>
+    </div>
+    <div>
+      <h3>Borrowed lore (read-only)</h3>
+      <p class="muted">Everything this story draws on — the primary universe plus every outline link match.</p>
+      <div id="borrowed-panel"></div>
+    </div>
+  </div>
+</details>
+
+<h2>Outline <span class="muted">(free-form markdown; mark beats to expand; link canon as [Name](target) — or type /name and pick from your lore)</span></h2>
+<div id="outline-host" class="md-host"><textarea id="outline" rows="12">{{story.outline_md}}</textarea></div>
+
+<div class="story-grid">
+  <div>
+    <h2>Chapters</h2>
+    <div id="chapter-list-holder">
+    <ol id="chapter-list">
+      {{#each chapters}}
+      <li data-seq="{{seq}}">
+        <a href="#" onclick="loadChapter({{seq}});return false">
+          #{{seq}} · {{title}} · <span class="badge {{status}}">{{status}}</span>
+          {{#if has_summary}}<span class="badge summary" title="This chapter has an AI summary — that's how the AI remembers it">✓ summarized</span>{{/if}}
+        </a>
+      </li>
+      {{/each}}
+    </ol>
+    {{#unless chapters.length}}<p class="muted">No chapters yet.</p>{{/unless}}
+    </div>
+    <p><button id="new-chapter-btn" onclick="newChapter()">+ New chapter</button></p>
+  </div>
+
+  <div>
+    <h2>Chapter</h2>
+    <div id="chapter-pane" hidden>
+      <div class="toolbar">
+        <button id="generate-this-btn" onclick="generateChapter(true)" hidden>Generate this chapter</button>
+        <button id="generate-btn" onclick="generateChapter(false)">Generate next chapter</button>
+        <label for="word-hint" class="word-hint-label">Length</label>
+        <select id="word-hint" title="Word-count hint for the AI (no verification — just a hint)">
+          <option value="">(no preference)</option>
+          <option value="under 1000 words">under 1000 words</option>
+          <option value="1000-3000 words">1000-3000 words</option>
+          <option value="3000-6000 words">3000-6000 words</option>
+          <option value="6000-9000 words">6000-9000 words</option>
+          <option value="9000+ words">9000+ words</option>
+        </select>
+        <label for="style-prompt" class="word-hint-label">Style</label>
+        <select id="style-prompt" title="Writing style (a saved skill) injected into the AI's prompt for this run">
+          <option value="">(none)</option>
+          {{#each styles}}
+          <option value="{{id}}">{{name}}</option>
+          {{/each}}
+        </select>
+        <button id="styleextract-btn" onclick="extractStyle()" title="The AI reads your last few chapters and writes a description of your writing style — saved automatically as a style you can pick for Generate (running it again updates the same style)">✍ Extract style</button>
+        <button id="summarize-btn" onclick="summarize()" title="Summarizes every chapter that doesn't have a summary yet (including this one) — summaries are how the AI remembers the story">Summarize</button>
+        <button id="loresuggest-btn" onclick="loreSuggest()">AI lore suggestion</button>
+        <span class="sep"></span>
+        <button id="save-btn" onclick="saveChapter()">Save chapter</button>
+        <button id="preview-btn" onclick="previewChapter()">Preview</button>
+        <button id="finalize-btn" onclick="finalizeChapter()">Finalize</button>
+        <span class="spacer"></span>
+        <button id="delete-btn" onclick="deleteChapter()" class="danger">Delete</button>
+      </div>
+      <label for="ch-title">Title</label>
+      <input id="ch-title" maxlength="200">
+      <!-- summary status of the OPEN chapter (the AI's memory of it):
+           shown as soon as a chapter is loaded or a new one is started -->
+      <div id="summary-status" class="summary-status" hidden></div>
+      <label for="ch-body">Body (markdown)</label>
+      <div id="ch-body-host" class="md-host"><textarea id="ch-body" rows="18"></textarea></div>
+    </div>
+    <div id="chapter-placeholder" class="muted">Select a chapter, or create/generate one.</div>
+  </div>
+</div>
+
+<!-- AI stream pane (page-level, NOT inside the chapter pane): AI actions
+     can be triggered with no chapter open (e.g. the summarize hint banner
+     at the top of the page) — the stream must be visible from anywhere on
+     the page. Hidden unless a run is streaming. -->
+<p id="stream-pane" class="stream-pane" hidden></p>
+<p>
+  <a href="/ai" class="muted">AI activity → AI Monitor</a>
+</p>
+
+<div id="preview-overlay" class="preview-overlay" hidden>
+  <div class="preview-panel">
+    <div class="preview-toolbar">
+      <span class="muted">Preview — how this chapter will read on the <a href="/shelf">Shelf</a></span>
+      <button class="button" onclick="closePreview()">Close</button>
+    </div>
+    <div class="reader" id="preview-body"></div>
+  </div>
+</div>
+
+<p>
+  <button onclick="finalizeStory()">Finalize story</button>
+  <span class="muted">All chapters become final and the story moves to the <a href="/shelf">Shelf</a>.</span>
+</p>
+
+<script src="/js/story.js" defer></script>
+<script>
+  const STORY_ID = {{story.id}};
+  const STORY_TITLE = {{{storyTitleJson}}};
+  // editors (CR round 3): textarea-backed stub, swapped in place by
+  // /js/story.js (CodeMirror 6). ALL page reads/writes go through this
+  // API, so save/verify/preview/load + the AI lock work with or without
+  // the bundle (no bundle → the plain textareas keep working)
+  window.storyEditors = window.storyEditors || {
+    outline: boxFor(document.getElementById("outline")),
+    chapter: boxFor(document.getElementById("ch-body")),
+  };
+  function boxFor(ta) {
+    return {
+      get: () => ta.value,
+      set: (v) => { ta.value = v; },
+      setReadOnly: (b) => { ta.readOnly = b; },
+    };
+  }
+  let currentSeq = null;
+  // fresh results (re)loaded after each save; initially the server-rendered data
+  let borrowedData = {{{borrowedJson}}};
+  // ---------- outline ----------
+  function saveOutline() {
+    return api(`/api/stories/${STORY_ID}`, { method: "POST", body: { outline_md: window.storyEditors.outline.get() } })
+      .then(() => verify(true));
+  }
+  function verify(silent) {
+    return api(`/api/stories/${STORY_ID}/verify`, { method: "POST" })
+      .then((j) => j.results)
+      .then((results) => {
+        borrowedData = results; // keep the borrowed-lore panel in sync (FR-21b)
+        renderVerifyReport(results);
+        renderBorrowed();
+        return results;
+      });
+  }
+  function renderVerifyReport(results) {
+    const el = document.getElementById("verify-report");
+    if (!results || !results.length) {
+      el.hidden = false;
+      el.innerHTML = '<p class="muted">No outline links to verify.</p>';
+      return;
+    }
+    el.hidden = false;
+    el.innerHTML = "<h3>Verify report</h3><ul>" + results.map((r) =>
+      r.matched
+        ? `<li>✅ <code>[${esc(r.text)}]</code> → <strong>${esc(r.title)}</strong> in ${esc(r.universe)}${r.matched.entry_id ? "" : " (whole universe)"}</li>`
+        : `<li>❌ <code>[${esc(r.text)}]</code> → <em>${esc(r.target)}</em> — not found</li>`
+    ).join("") + "</ul>";
+  }
+  function renderBorrowed() {
+    const el = document.getElementById("borrowed-panel");
+    const pu = document.getElementById("primary-universe").selectedOptions[0];
+    let html = `<p><strong>Primary universe:</strong> ${pu && pu.value ? esc(pu.text) : "(original world)"}</p>`;
+    if (borrowedData.length) {
+      html += "<ul>" + borrowedData.map((r) =>
+        r.matched
+          ? `<li>${esc(r.target)} → <strong>${esc(r.title)}</strong> in ${esc(r.universe)}</li>`
+          : `<li>${esc(r.target)} → <span class="error">not found</span></li>`
+      ).join("") + "</ul>";
+    } else {
+      html += '<p class="muted">No outline links.</p>';
+    }
+    el.innerHTML = html;
+  }
+
+  // ---------- settings ----------
+  function toggleSettings() {
+    const s = document.getElementById("settings");
+    s.open = !s.open;
+  }
+  function setPrimaryUniverse() {
+    const v = document.getElementById("primary-universe").value;
+    api(`/api/stories/${STORY_ID}`, { method: "POST", body: { universe_id: v ? Number(v) : null } })
+      .then(() => location.reload())
+      .catch(() => alert("failed to save"));
+  }
+
+  // ---------- summarize hint (change request 2026-10-13, FR-23a) ----------
+  // "Do you want to summarize now?" once the story accumulates unsummarized
+  // chapters (server renders the banner when the per-user setting is on and
+  // the count is past the threshold). Dismissal is per browser session —
+  // the banner is back in a new session, and can be turned off for good
+  // under ⚙ Settings → Hints.
+  (function hideDismissedHint() {
+    const h = document.getElementById("summarize-hint");
+    if (h && sessionStorage.getItem("summarizeHint:" + STORY_ID)) h.hidden = true;
+  })();
+  /**
+   * Failed-run banner — DB-backed (round 5 fix, 2026-10-14): the earlier
+   * sessionStorage version only appeared if the page that started the run
+   * was still open when the run ENDED — the user had navigated away, so
+   * they saw "no banner at all". Now we read the story's LAST ai_run row
+   * (/api/ai/last-run): a failed run is reported on the NEXT visit, no
+   * need to watch the stream. A newer run (any outcome) replaces "the
+   * last run", so the banner never lingers over a fresh one. Dismissal is
+   * per run id, per browser session.
+   */
+  api(`/api/ai/last-run?story_id=${STORY_ID}`)
+    .then((j) => {
+      const run = j && j.run;
+      if (!run || run.status !== "error" || !run.error) return;
+      let dismissed = null;
+      try { dismissed = sessionStorage.getItem("aiRunErrorDismissed"); } catch { /* private mode */ }
+      if (String(run.id) === dismissed) return;
+      const el = document.createElement("div");
+      el.id = "run-error-banner";
+      el.className = "error";
+      el.style.cssText = "border:1px solid var(--error);border-left:3px solid var(--error);border-radius:8px;padding:10px 14px;margin:12px 0";
+      el.innerHTML = "⚠ The last AI run on this story failed (" + esc(run.kind) + "): <strong>" +
+        esc(run.error) +
+        "</strong> <button class=\"muted\" onclick=\"dismissRunError(" + Number(run.id) + ")\">dismiss</button>";
+      const anchor = document.getElementById("verify-report");
+      if (anchor) anchor.after(el);
+    })
+    .catch(() => {});
+  function dismissRunError(runId) {
+    const el = document.getElementById("run-error-banner");
+    if (el) el.remove();
+    try { sessionStorage.setItem("aiRunErrorDismissed", String(runId)); } catch { /* ignore */ }
+  }
+  function dismissSummarizeHint() {
+    const h = document.getElementById("summarize-hint");
+    if (h) h.hidden = true;
+    try { sessionStorage.setItem("summarizeHint:" + STORY_ID, "1"); } catch { /* private mode */ }
+  }
+  function saveHintSettings() {
+    const enabled = document.getElementById("summarize-hint-enabled").checked ? "on" : "off";
+    const count = document.getElementById("summarize-hint-count").value;
+    Promise.all([
+      api("/api/settings", { method: "POST", body: { key: "summarize_hint", value: enabled } }),
+      api("/api/settings", { method: "POST", body: { key: "summarize_hint_chapters", value: count } }),
+    ])
+      .then(() => location.reload())
+      .catch((e) => alert(`failed to save hint settings: ${e.message}`));
+  }
+  /**
+   * "Summarize now" from the hint banner (bug fix 2026-10-13): the banner
+   * sits at the top of the page, usually with NO chapter open — the plain
+   * summarize() streams into the (now page-level) stream pane, but without
+   * these guards the click could look dead: no model loaded → the run dies
+   * silently in the stream; another action running → 409 with a generic
+   * alert. So check state first, and hide the banner while the run goes.
+   */
+  function summarizeFromHint() {
+    if (aiBusy || anyAiBusy) {
+      alert("An AI action is already running — wait for it to finish (AI Monitor).");
+      return;
+    }
+    if (!modelLoaded) {
+      alert("No model loaded — Load one from the AI Monitor page first.");
+      return;
+    }
+    dismissSummarizeHint(); // the run is on its way — don't re-nag on the reload
+    summarize();
+  }
+
+  // ---------- chapters ----------
+  let currentChapter = null; // { seq, status, ... } of the chapter in the pane
+  function chapterListHtml(chs) {
+    if (!chs.length) return '<p class="muted">No chapters yet.</p>';
+    return '<ol id="chapter-list">' + chs.map((c) =>
+      `<li data-seq="${c.seq}">
+        <a href="#" onclick="loadChapter(${c.seq});return false">
+          #${c.seq} · ${esc(c.title)} · <span class="badge ${c.status}">${c.status}</span>
+          ${c.has_summary ? '<span class="badge summary" title="This chapter has an AI summary — that\'s how the AI remembers it">✓ summarized</span>' : ""}
+        </a>
+      </li>`
+    ).join("") + "</ol>";
+  }
+  /**
+   * Refresh just the chapter list (FR-4: saving a chapter must NOT reload the
+   * page — the pane stays open, and "Generate this chapter" shows up for a
+   * newly saved draft without the user having to re-open anything).
+   */
+  async function refreshChapterList() {
+    try {
+      const j = await api(`/api/stories/${STORY_ID}/chapters`);
+      const holder = document.getElementById("chapter-list-holder");
+      if (holder) holder.innerHTML = chapterListHtml(j.chapters);
+      return j.chapters;
+    } catch {
+      location.reload();
+    }
+  }
+  function loadChapter(seq) {
+    return api(`/api/stories/${STORY_ID}/chapters/${seq}`)
+      .then((c) => {
+        currentSeq = c.seq;
+        currentChapter = c;
+        document.getElementById("ch-title").value = c.title;
+        window.storyEditors.chapter.set(c.body_md);
+        setSummaryStatus(!!c.has_summary);
+        showPane(true);
+      })
+      .catch((e) => alert(`failed to load chapter: ${e.message}`));
+  }
+  /**
+   * Summary status of the chapter OPEN in the pane: whether the AI has a
+   * summary to remember it by. (The chapter LIST shows a ✓ badge per
+   * chapter; the pane shows it for the chapter being edited — the user
+   * could not tell which chapters were already summarized, 2026-10-13.)
+   */
+  function setSummaryStatus(has) {
+    const el = document.getElementById("summary-status");
+    if (!el) return;
+    el.hidden = false;
+    el.className = "summary-status " + (has ? "ok" : "muted");
+    el.textContent = has
+      ? "✓ Summarized — the AI remembers this chapter from its summary."
+      : "No summary yet — the AI does not remember this chapter (click Summarize).";
+  }
+  function showPane(show) {
+    document.getElementById("chapter-pane").hidden = !show;
+    document.getElementById("chapter-placeholder").style.display = show ? "none" : "";
+    // when an existing chapter is open, the AI button acts on THAT chapter
+    // ("generate it"); with no chapter open it stays "generate next".
+    const existing = show && currentSeq !== null;
+    document.getElementById("generate-this-btn").hidden = !existing;
+    document.getElementById("generate-btn").hidden = existing;
+  }
+  function newChapter() {
+    document.getElementById("ch-title").value = "";
+    window.storyEditors.chapter.set("");
+    currentSeq = null;
+    currentChapter = null;
+    setSummaryStatus(false);
+    showPane(true);
+    document.getElementById("ch-title").focus();
+  }
+  function saveChapter() {
+    const title = document.getElementById("ch-title").value.trim();
+    if (!title) { alert("Title is required."); return; }
+    const seq = currentSeq ?? 0;
+    api(`/api/stories/${STORY_ID}/chapters/${seq}`, { method: "POST", body: { title, body_md: window.storyEditors.chapter.get() } })
+      .then((j) => {
+        currentSeq = j.seq; // the pane stays open — FR-4
+        showPane(true);     // "Generate this chapter" now shows for the saved draft
+        return refreshChapterList();
+      })
+      .catch(() => alert("failed to save chapter"));
+  }
+  /**
+   * FR-3: read the chapter AS IT IS NOW in the editing pane (unsaved text
+   * included) in a Shelf-style reading panel. Renders the markdown
+   * server-side (same renderer as the Shelf) and shows it in an overlay.
+   */
+  async function previewChapter() {
+    const title = document.getElementById("ch-title").value.trim();
+    if (!title) { alert("Give the chapter a title first."); return; }
+    const body = window.storyEditors.chapter.get();
+    try {
+      const j = await api(`/api/stories/${STORY_ID}/preview-chapter`, { method: "POST", body: { title, body_md: body } });
+      const pane = document.getElementById("preview-body");
+      pane.innerHTML =
+        `<h2>#${currentSeq ?? "?"} · ${esc(title)}</h2>` +
+        (j.html || '<p class="muted">(empty chapter)</p>') +
+        (body.trim() ? `<p class="muted">${j.word_count} words</p>` : "");
+      const ov = document.getElementById("preview-overlay");
+      ov.hidden = false;
+      ov.addEventListener("click", (e) => { if (e.target === ov) closePreview(); });
+      document.addEventListener("keydown", escClosePreview);
+      document.body.style.overflow = "hidden";
+    } catch (e) {
+      alert(`preview failed: ${e.message}`);
+    }
+  }
+  function closePreview() {
+    document.getElementById("preview-overlay").hidden = true;
+    document.removeEventListener("keydown", escClosePreview);
+    document.body.style.overflow = "";
+  }
+  function escClosePreview(e) { if (e.key === "Escape") closePreview(); }
+  function finalizeChapter() {
+    if (currentSeq === null) return;
+    if (!confirm("Mark this chapter final?")) return;
+    api(`/api/stories/${STORY_ID}/chapters/${currentSeq}/finalize`, { method: "POST" })
+      .then(() => location.reload())
+      .catch((e) => alert(`failed: ${e.message}`));
+  }
+  function deleteChapter() {
+    if (currentSeq === null) return;
+    const title = document.getElementById("ch-title").value || "this chapter";
+    if (!confirm(`Delete chapter "${title}"? Later chapters shift up. This cannot be undone.`)) return;
+    api(`/api/stories/${STORY_ID}/chapters/${currentSeq}/delete`, { method: "POST" })
+      .then(() => location.reload())
+      .catch((e) => alert(`failed: ${e.message}`));
+  }
+  function finalizeStory() {
+    if (!confirm("Finalize the whole story? All chapters become final and it moves to the Shelf.")) return;
+    api(`/api/stories/${STORY_ID}/finalize`, { method: "POST" })
+      .then((j) => alert(`Finalized ${j.chapters} chapter(s). See the Shelf.`))
+      .catch(() => alert("failed"));
+  }
+
+  // ---------- AI (endpoints come online in Phase 4) ----------
+  let modelLoaded = null;
+  let aiBusy = false;    // the AI is writing THIS story right now
+  let anyAiBusy = false; // any AI action of this user is running (FR-25: one at a time)
+  let myRunId = null;    // the id of this story's active run (for Stop)
+  // runs this page already opened a live stream for — the 5s activity poll
+  // must not attach a SECOND stream to the same run (that reset the stream
+  // pane to "starting…" a few seconds into the run, mid-summarize the
+  // visible transcript jumped and looked like the run restarted on itself)
+  const streamedRuns = new Set();
+  function paintGenerateButtons() {
+    // while the AI is busy with THIS story the buttons stay locked
+    // (lockForAi owns them); otherwise model state decides
+    for (const id of ["generate-btn", "generate-this-btn"]) {
+      const btn = document.getElementById(id);
+      if (!btn || btn.hidden) continue;
+      if (aiBusy) {
+        btn.disabled = true;
+        btn.title = "the AI is writing this story";
+      } else if (anyAiBusy) {
+        // one AI action per user at a time (FR-25) — a run for another story
+        // is in flight, so generating here would just 409
+        btn.disabled = true;
+        btn.title = "another AI action is running — wait for it (AI Monitor)";
+      } else {
+        btn.disabled = !modelLoaded;
+        btn.title = modelLoaded ? "" : "load a model first (AI Monitor)";
+      }
+    }
+  }
+  async function refreshModelState() {
+    try {
+      const res = await fetch("/api/model");
+      modelLoaded = !!(await res.json()).loaded;
+    } catch {
+      modelLoaded = false;
+    }
+    paintGenerateButtons();
+  }
+  refreshModelState();
+  setInterval(refreshModelState, 5000);
+
+  // ---------- "this story is being written" indicator ----------
+  // The global navbar badge (app.js) says the AI is working somewhere; this
+  // one makes the state of THIS story explicit on this page: if this story's
+  // outline/chapters are what the model is writing right now, lock the page
+  // visibly. Polls /api/ai/current (5s, same as the badge).
+  function lockForAi(lock) {
+    aiBusy = lock;
+    // note: stop-btn is the OPPOSITE — enabled exactly while the AI is busy
+    const ids = ["save-btn", "finalize-btn", "delete-btn", "new-chapter-btn", "preview-btn",
+                 "summarize-btn", "loresuggest-btn", "generate-btn", "generate-this-btn",
+                 "styleextract-btn"];
+    for (const id of ids) {
+      const b = document.getElementById(id);
+      if (b) b.disabled = lock;
+    }
+    const stopB = document.getElementById("stop-btn");
+    if (stopB) stopB.disabled = !lock;
+    const ind = document.getElementById("writing-indicator");
+    ind.hidden = !lock;
+    document.getElementById("ch-title").readOnly = lock;
+    window.storyEditors.chapter.setReadOnly(lock);
+    paintGenerateButtons();
+  }
+  async function refreshAiActivity() {
+    // novelAuthLost comes from /js/app.js (deferred — runs AFTER this inline
+    // script), so the very first top-level call must not dereference it bare:
+    // a ReferenceError here would abort the script and the 5s interval below
+    // would never be registered (the story-level AI lock would stop working).
+    if (typeof novelAuthLost === "function" && novelAuthLost()) return;
+    let j;
+    try {
+      const res = await fetch("/api/ai/current");
+      if (!res.ok) return;
+      j = await res.json();
+    } catch {
+      return;
+    }
+    const run = j && j.run;
+    const mine = run && Number(run.target && run.target.story_id) === STORY_ID;
+    anyAiBusy = !!run;
+    const wasBusy = aiBusy;
+    myRunId = mine ? run.id : null;
+    if (mine) {
+      // a new run for THIS story started — drop the previous failure
+      // banner (that run is no longer the "last run", so the banner will
+      // not come back on the next reload either)
+      const eb = document.getElementById("run-error-banner");
+      if (eb) eb.remove();
+    }
+    lockForAi(!!mine);
+    if (mine && !wasBusy && !streamedRuns.has(run.id)) {
+      // a run for THIS story is active but this page didn't start it
+      // (reloaded mid-generation, or it began elsewhere) — watch its stream
+      // so this page still ends with the reload, like the originating page
+      streamTo(run.id, "AI action finished.");
+    }
+  }
+  refreshAiActivity();
+  setInterval(refreshAiActivity, 5000);
+
+  /** FR-6: emergency stop — cancel this story's active AI run. */
+  async function stopAi() {
+    if (!myRunId) return;
+    if (!confirm("Stop the AI? The run will be cancelled and no chapter will be saved.")) return;
+    try {
+      const res = await fetch(`/api/ai/runs/${myRunId}/cancel`, { method: "POST" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error ?? "stop failed");
+      }
+    } catch (e) {
+      alert(`stop failed: ${e.message}`);
+    }
+    // the stream ends with an error event → streamTo's reload takes over
+  }
+
+  async function confirmUnmatched() {
+    const results = await verify(true);
+    const unmatched = results.filter((r) => !r.matched);
+    if (!unmatched.length) return true;
+    return confirm(`${unmatched.length} outline link(s) match no lore — generate anyway?`);
+  }
+  async function startAi(kind, body) {
+    const res = await fetch(`/api/ai/${kind}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error ?? "AI action failed (is a model loaded? see AI Monitor)");
+      return null;
+    }
+    return res.json();
+  }
+  function streamTo(runId, doneMsg) {
+    streamedRuns.add(runId); // the 5s poll must not attach a 2nd stream
+    const pane = document.getElementById("stream-pane");
+    pane.hidden = false;
+    pane.textContent = "starting…\n";
+    // FR-7: show the model's thinking (reasoning tokens, if the server
+    // emits them) distinctly from the chapter text
+    subscribeStream(`/api/ai/runs/${runId}/stream`, pane, (msg) => {
+      if (msg.type === "thought") pane.textContent += `\n💭 thinking: ${msg.text}`;
+      // phase markers (e.g. "summarizing ch 2 — X (2 of 4)…" for the
+      // all-chapters Summarize run) — without these the stream looks like
+      // a single summary and the user thinks only one chapter was covered
+      if (msg.type === "thinking" && msg.message) pane.textContent += `\n… ${msg.message}\n`;
+    })
+      .then((err) => {
+        // The page reloads the moment the run ends. On failure the
+        // failed-run banner (DB-backed, /api/ai/last-run — see the top of
+        // this script) shows the exact error after the reload, so the
+        // error never has to survive in the browser:
+        if (!err && doneMsg) pane.textContent += `\n\n${doneMsg}`;
+        location.reload();
+      });
+  }
+  async function generateChapter(thisChapter) {
+    if (aiBusy) {
+      alert("The AI is already working on this story — wait for it to finish (AI Monitor).");
+      return;
+    }
+    if (anyAiBusy) {
+      alert("Another AI action is still running — only one at a time. Wait for it (AI Monitor).");
+      return;
+    }
+    if (!modelLoaded) {
+      alert("No model loaded — Load one from the AI Monitor page first.");
+      return;
+    }
+    const ok = await confirmUnmatched();
+    if (!ok) return;
+    if (thisChapter) {
+      if (currentSeq === null) return;
+      if (!confirm(`Regenerate chapter #${currentSeq} in place? Its current text will be replaced with a new draft.`)) return;
+    }
+    const body = { story_id: STORY_ID };
+    if (thisChapter) body.chapter_seq = currentSeq;
+    // word-count hint (FR-2): a type hint injected into the generate prompt
+    const hint = document.getElementById("word-hint").value;
+    if (hint) body.word_hint = hint;
+    // writing style ("skill", FR round 2): injected into the generate prompt
+    const styleId = document.getElementById("style-prompt").value;
+    if (styleId) body.style_id = Number(styleId);
+    const j = await startAi("generate", body);
+    if (j) streamTo(j.run.id, thisChapter ? "Chapter regenerated — reload complete." : "New draft chapter saved — reload complete.");
+  }
+  function summarize() {
+    // same guards as the other AI entry points: the toolbar button is only
+    // disabled while THIS page knows a run is active, so a double-click or
+    // a run started in another tab must not race into a confusing 409
+    if (aiBusy || anyAiBusy) {
+      alert("An AI action is already running — wait for it to finish (AI Monitor).");
+      return;
+    }
+    if (!modelLoaded) {
+      alert("No model loaded — Load one from the AI Monitor page first.");
+      return;
+    }
+    startAi("summarize", { story_id: STORY_ID }).then((j) => {
+      if (j) streamTo(j.run.id, "Summaries saved.");
+    });
+  }
+  function loreSuggest() {
+    startAi("lore-suggest", { story_id: STORY_ID }).then((j) => {
+      if (!j) return;
+      // suggestions arrive as JSON in the done payload
+      const pane = document.getElementById("stream-pane");
+      pane.hidden = false;
+      pane.textContent = "requesting suggestions…\n";
+      subscribeStream(`/api/ai/runs/${j.run.id}/stream`, pane, (msg) => {
+        if (msg.type === "done" && Array.isArray(msg.suggestions)) {
+          renderSuggestions(msg.suggestions);
+        }
+      });
+    });
+  }
+  function renderSuggestions(suggestions) {
+    const pane = document.getElementById("stream-pane");
+    pane.innerHTML = "<h3>Proposed lore changes</h3><ul>" + suggestions.map((s, i) =>
+      `<li data-i="${i}">
+        <strong>${s.type === "add" ? "➕ Add" : "🗑 Delete"}</strong>
+        ${s.title ? `<strong>${esc(s.title)}</strong>` : ""} in <em>${esc(s.universe)}</em>
+        <div class="muted">${esc(s.reason ?? "")}</div>
+        ${s.type === "add" ? `<div>${esc(s.body_md ?? "")}</div><button onclick="applySuggestion(${i})">Apply</button>` : `<button class="danger" onclick="applySuggestion(${i})">Confirm delete</button>`}
+      </li>`
+    ).join("") + "</ul>";
+    window.__suggestions = suggestions;
+  }
+  function applySuggestion(i) {
+    const s = window.__suggestions[i];
+    if (!s) return;
+    if (s.type === "delete" && !confirm(`Delete lore entry "${s.title}"?`)) return;
+    // the server only deletes lore when `confirmed: true` is present (the
+    // confirm() above is what earns it); and the API answers 200 {ok:false}
+    // on rejection, so check `ok` before claiming success
+    api(`/api/ai/lore-suggest/apply`, { method: "POST", body: { ...s, confirmed: s.type === "delete" } })
+      .then((j) => { if (j && j.ok) alert("Applied."); else alert((j && j.error) || "apply failed"); })
+      .catch(() => alert("apply failed"));
+  }
+
+  // ---------- extract style (change request 2026-10-13, FR-22e) ----------
+  // The AI reads the story's last few chapters and writes a description of
+  // the author's writing style (streams live, like the other actions). The
+  // SERVER auto-saves the result as a style prompt ("skill") — it can never
+  // be lost by navigating away. The pane then offers to rename or delete it
+  // through the EXISTING style-prompt API; the saved style shows up in the
+  // Style dropdown and can be picked for Generate.
+  let styleResultId = null;
+  let styleResultText = null;
+  function extractStyle() {
+    if (aiBusy || anyAiBusy) {
+      alert("An AI action is already running — wait for it to finish (AI Monitor).");
+      return;
+    }
+    const nCh = document.querySelectorAll("#chapter-list li").length;
+    if (!nCh) {
+      alert("No chapters to read yet — write or generate a chapter first.");
+      return;
+    }
+    startAi("style-extract", { story_id: STORY_ID }).then((j) => {
+      if (!j) return;
+      const pane = document.getElementById("stream-pane");
+      pane.hidden = false;
+      pane.textContent = "the AI is reading the last " + Math.min(nCh, 3) + " chapter(s) and writing your style…\n";
+      styleResultId = null;
+      styleResultText = null;
+      subscribeStream(`/api/ai/runs/${j.run.id}/stream`, pane, (msg) => {
+        if (msg.type === "thought") pane.textContent += `\n💭 thinking: ${msg.text}`;
+        // the style text + its saved id/name arrive in the done payload —
+        // it is already saved; offer rename/delete (no reload here: the
+        // author can keep the result on screen)
+        if (msg.type === "done" && msg.text) renderStyleResult(msg.text, msg.style);
+      });
+    });
+  }
+  function renderStyleResult(text, style) {
+    styleResultId = style && style.id != null ? style.id : null;
+    styleResultText = text;
+    const savedName = (style && style.name) || (STORY_TITLE + "'s style");
+    const pane = document.getElementById("stream-pane");
+    pane.innerHTML =
+      "<h3>✍ Writing style — saved</h3>" +
+      `<pre class="style-result">${esc(text)}</pre>` +
+      `<p>Saved as style <strong>${esc(savedName)}</strong> — pick it in the <strong>Style</strong> dropdown next to Length for Generate. Running Extract style again updates this same style.</p>` +
+      `<label for="style-extract-name">Rename style</label>` +
+      `<input id="style-extract-name" maxlength="100" value="${esc(savedName)}">` +
+      `<p><button onclick="renameStyleResult()">Rename</button> ` +
+      `<button class="muted" onclick="deleteStyleResult()">Delete</button></p>`;
+  }
+  function renameStyleResult() {
+    if (styleResultId == null) return;
+    const name = document.getElementById("style-extract-name").value.trim();
+    if (!name) { alert("Name cannot be empty."); return; }
+    api("/api/style-prompts/" + styleResultId, { method: "POST", body: { name, text_md: styleResultText } })
+      .then(() => location.reload())
+      .catch((e) => alert(`failed to rename style: ${e.message}`));
+  }
+  function deleteStyleResult() {
+    if (styleResultId == null) return;
+    if (!confirm("Delete this style?")) return;
+    api("/api/style-prompts/" + styleResultId + "/delete", { method: "POST" })
+      .then(() => location.reload())
+      .catch((e) => alert(`failed to delete style: ${e.message}`));
+  }
+
+  // ---------- shared ----------
+  async function api(path, opts) {
+    opts = opts ?? {};
+    const res = await fetch(path, {
+      method: opts.method ?? "GET",
+      headers: { "content-type": "application/json" },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error ?? "request failed");
+    }
+    return res.json();
+  }
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+  function subscribeStream(url, target, onMsg) {
+    return fetch(url, { headers: { accept: "text/event-stream" } }).then(async (res) => {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let runError = null;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const evt = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataLine = evt.split("\n").find((l) => l.startsWith("data:"));
+          if (!dataLine) continue;
+          let msg;
+          try { msg = JSON.parse(dataLine.slice(5)); } catch { continue; }
+          if (onMsg) onMsg(msg);
+          if (msg.type === "delta") target.textContent += msg.text ?? "";
+          else if (msg.type === "error") {
+            runError = msg.message;
+            target.textContent += `\n[error] ${msg.message}`;
+          }
+        }
+      }
+      // resolve with the run's error (or null) — the caller can persist it
+      // across the post-run reload, so a failed run is never silent
+      return runError;
+    });
+  }
+
+  // initial render
+  renderVerifyReport(borrowedData);
+  renderBorrowed();
+</script>

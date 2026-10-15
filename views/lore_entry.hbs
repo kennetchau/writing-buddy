@@ -1,0 +1,194 @@
+<h1>{{#if entry.id}}Edit entry{{else}}New entry{{/if}}</h1>
+<p><a href="/lore/universe/{{universeId}}">← {{universeName}}</a></p>
+
+{{#if error}}<p class="error">{{error}}</p>{{/if}}
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+
+<form id="entry-form" onsubmit="return saveEntry(event)">
+  <input type="hidden" id="entry-id" name="id" value="{{#if entry.id}}{{entry.id}}{{else}}0{{/if}}">
+  <input type="hidden" id="entry-universe" name="universe_id" value="{{universeId}}">
+
+  <label for="entry-title">Title</label>
+  <input id="entry-title" name="title" required maxlength="300" value="{{#if entry.title}}{{entry.title}}{{/if}}">
+
+  <label for="entry-body">Body (markdown)</label>
+  <textarea id="entry-body" name="body_md" rows="18">{{#if entry.body_md}}{{entry.body_md}}{{/if}}</textarea>
+
+  <label>Categories <span class="muted">(check all that apply)</span></label>
+  {{#if categories.length}}
+  <div class="cat-checks">
+    {{#each categories}}
+    <label class="cat-check">
+      <input type="checkbox" name="category" value="{{id}}"
+             {{#if (contains id ../entryCategoryIds)}}checked{{/if}}>
+      {{name}}
+    </label>
+    {{/each}}
+  </div>
+  {{else}}
+  <p class="muted">No categories in this universe yet — create one on the <a href="/lore/universe/{{universeId}}">universe page</a>.</p>
+  {{/if}}
+
+  <p>
+    <button type="submit">Save</button>
+    {{#if entry.id}}
+    <button type="button" onclick="deleteEntry()" class="danger">Delete entry</button>
+    {{/if}}
+  </p>
+</form>
+
+{{#if universes.length}}
+<h2>Move to another universe</h2>
+<p class="muted">The entry belongs to exactly one universe. Moving it keeps all text and images.</p>
+<form onsubmit="return moveEntry(event)">
+  <select id="move-to" name="move_to">
+    {{#each universes}}
+      <option value="{{id}}" {{#if (eq id universeId)}}selected{{/if}}>{{name}}</option>
+    {{/each}}
+  </select>
+  <button type="submit">Move</button>
+</p>
+{{/if}}
+
+<h2>Images</h2>
+<div id="image-row" style="display:flex;gap:10px;flex-wrap:wrap">
+  {{#each images}}
+  <figure style="margin:0;border:1px solid #2e333f;border-radius:6px;padding:6px">
+    <img src="/images/{{filename}}" alt="{{filename}}" style="max-height:120px;display:block">
+    <figcaption>
+      <button type="button" onclick="deleteImage({{id}})">✕</button>
+      <button type="button" onclick="describeImage({{id}}, this)">Describe (AI)</button>
+    </figcaption>
+  </figure>
+  {{/each}}
+</div>
+<form id="upload-form" onsubmit="return uploadImage(event)" style="max-width:420px">
+  <label for="image-file">Upload image (png/jpg/gif/webp, max 15 MB)</label>
+  <input id="image-file" name="image" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+  <p><button type="submit">Upload</button></p>
+</form>
+<div id="image-desc-pane" hidden>
+  <h3>Image description</h3>
+  <div id="image-desc-stream" class="stream-pane"></div>
+  <p class="muted">Copy/edit this into the entry — the AI never writes the entry itself.</p>
+</div>
+
+<script>
+  const ENTRY_ID = {{#if entry.id}}{{entry.id}}{{else}}0{{/if}};
+  function checkedCategoryIds() {
+    return [...document.querySelectorAll('input[name="category"]:checked')].map(
+      (c) => Number(c.value),
+    );
+  }
+  function saveEntry(ev) {
+    ev.preventDefault();
+    const body = {
+      title: document.getElementById("entry-title").value,
+      body_md: document.getElementById("entry-body").value,
+      universe_id: Number(document.getElementById("entry-universe").value),
+      category_ids: checkedCategoryIds(),
+    };
+    const id = Number(document.getElementById("entry-id").value);
+    const url = id === 0 ? "/api/entries/0" : `/api/entries/${id}`;
+    fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .then((r) => r.ok ? location.reload() : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+    return false;
+  }
+  function deleteEntry() {
+    if (!confirm("Delete this entry and its link? Images are kept but detached.")) return;
+    fetch(`/api/entries/${ENTRY_ID}/delete`, { method: "POST" })
+      .then((r) => r.ok ? (location.href = "/lore/universe/" + document.getElementById("entry-universe").value) : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+  }
+  function moveEntry(ev) {
+    ev.preventDefault();
+    const move_to = Number(document.getElementById("move-to").value);
+    if (ENTRY_ID === 0) { alert("Save the entry first."); return false; }
+    // same universe → carry the checked categories; another universe → the
+    // server detaches foreign categories (they don't apply there)
+    const sameUniverse = move_to === Number(document.getElementById("entry-universe").value);
+    fetch(`/api/entries/${ENTRY_ID}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: document.getElementById("entry-title").value,
+        body_md: document.getElementById("entry-body").value,
+        move_to,
+        ...(sameUniverse ? { category_ids: checkedCategoryIds() } : {}),
+      }),
+    })
+      .then((r) => r.ok ? location.reload() : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+    return false;
+  }
+  function uploadImage(ev) {
+    ev.preventDefault();
+    const f = document.getElementById("image-file");
+    if (!f.files.length) return false;
+    const fd = new FormData();
+    fd.append("image", f.files[0]);
+    if (ENTRY_ID > 0) fd.append("lore_entry_id", String(ENTRY_ID));
+    fetch("/api/images", { method: "POST", body: fd })
+      .then((r) => r.ok ? location.reload() : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+    return false;
+  }
+  function deleteImage(id) {
+    if (!confirm("Delete this image?")) return;
+    fetch(`/api/images/${id}/delete`, { method: "POST" })
+      .then((r) => r.ok ? location.reload() : r.json().then((j) => alert(j.error)))
+      .catch(() => alert("network error"));
+  }
+  async function describeImage(id, btn) {
+    const pane = document.getElementById("image-desc-pane");
+    const stream = document.getElementById("image-desc-stream");
+    pane.hidden = false;
+    stream.textContent = "starting…\n";
+    try {
+      const start = await fetch("/api/ai/image-desc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ image_id: id }),
+      });
+      if (!start.ok) {
+        stream.textContent = (await start.json()).error ?? "failed to start";
+        return;
+      }
+      const { run } = await start.json();
+      await subscribeStream(`/api/ai/runs/${run.id}/stream`, stream);
+    } catch {
+      stream.textContent = "network error";
+    }
+  }
+  // SSE-over-fetch subscription (shared helper — see app.ts)
+  async function subscribeStream(url, target) {
+    const res = await fetch(url, { headers: { accept: "text/event-stream" } });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const evt = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const dataLine = evt.split("\n").find((l) => l.startsWith("data:"));
+        if (!dataLine) continue;
+        try {
+          const msg = JSON.parse(dataLine.slice(5));
+          if (msg.type === "delta") target.textContent += msg.text ?? "";
+          else if (msg.type === "done") { target.textContent += msg.text ?? ""; target.textContent += "\n— done"; }
+          else if (msg.type === "error") target.textContent += `\n[error] ${msg.message}`;
+        } catch { /* ignore keepalive */ }
+      }
+    }
+  }
+</script>
+
+<style>
+  .cat-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 4px; }
+  .cat-check { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--fg); }
+</style>

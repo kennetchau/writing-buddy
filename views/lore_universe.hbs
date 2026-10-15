@@ -1,0 +1,107 @@
+<h1>Lore — {{universe.name}}</h1>
+{{#if universe.description}}<p class="muted">{{universe.description}}</p>{{/if}}
+<a href="/lore">← all universes</a>
+
+{{#if message}}<p class="muted">{{message}}</p>{{/if}}
+
+<div class="lore-split">
+  <div class="lore-main">
+    <p><a class="button" href="/lore/universe/{{universe.id}}/new">+ New entry</a>
+      {{#if activeCategoryId}}<span class="muted"> · filtered by category</span> <a href="/lore/universe/{{universe.id}}">show all</a>{{/if}}
+    </p>
+
+    {{#if entries.length}}
+    <table>
+      <thead>
+        <tr><th>Title</th><th>Words</th><th>Images</th><th>Updated</th></tr>
+      </thead>
+      <tbody>
+      {{#each entries}}
+        <tr>
+          <td><a href="/lore/entry/{{id}}">{{title}}</a></td>
+          <td class="muted">{{word_count}}</td>
+          <td>
+            {{#if thumbnails.length}}
+            <span class="thumbs">
+              {{#each thumbnails}}<img src="/images/{{this}}" alt="thumbnail" title="{{this}}" />{{/each}}
+            </span>
+            {{else}}<span class="muted">—</span>{{/if}}
+          </td>
+          <td class="muted"></td>
+        </tr>
+      {{/each}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="muted">No entries{{#if activeCategoryId}} in this category{{/if}} yet.</p>
+    {{/if}}
+  </div>
+
+  <aside class="lore-side">
+    <h3>Categories</h3>
+    {{#if categories.length}}
+    <ul class="cat-list">
+      {{#each categories}}
+      <li>
+        <a href="/lore/universe/{{../universe.id}}?category={{id}}"
+           class="{{#if (eq id ../activeCategoryId)}}active{{/if}}">
+          {{name}} <span class="muted">({{entry_count}})</span>
+        </a>
+        <button type="button" class="cat-del" title="Delete category"
+                onclick="deleteCategory({{id}}, this)">✕</button>
+      </li>
+      {{/each}}
+    </ul>
+    {{else}}
+    <p class="muted">No categories yet — add one below.</p>
+    {{/if}}
+    <form onsubmit="return addCategory(event)">
+      <input id="new-cat-name" name="name" maxlength="100" placeholder="New category name" required>
+      <p><button type="submit">Add category</button></p>
+    </form>
+    <p class="muted">Attach entries to a category from the entry editor. Deleting a category detaches its entries (they are not deleted).</p>
+  </aside>
+</div>
+
+<script>
+  const UNIVERSE_ID = {{universe.id}};
+  function addCategory(ev) {
+    ev.preventDefault();
+    const name = document.getElementById("new-cat-name").value.trim();
+    if (!name) return false;
+    fetch("/api/lore-categories", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ universe_id: UNIVERSE_ID, name }),
+    })
+      .then((r) => (r.ok ? location.reload() : r.json().then((j) => alert(j.error ?? "failed"))))
+      .catch(() => alert("network error"));
+    return false;
+  }
+  function deleteCategory(id, btn) {
+    if (!confirm("Delete this category? Attached entries stay — they are only detached from it.")) return;
+    btn.disabled = true;
+    fetch(`/api/lore-categories/${id}/delete`, { method: "POST" })
+      .then((r) => (r.ok ? location.reload() : r.json().then((j) => alert(j.error ?? "failed"))))
+      .catch(() => alert("network error"));
+  }
+</script>
+
+<style>
+  .lore-split { display: grid; grid-template-columns: 1fr 260px; gap: 24px; align-items: start; }
+  .lore-side {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .lore-side h3 { margin: 4px 0 10px; }
+  .cat-list { list-style: none; margin: 0 0 12px; padding: 0; }
+  .cat-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0; }
+  .cat-list a { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-list a.active { color: var(--accent); font-weight: 600; }
+  .cat-del {
+    flex: 0 0 auto; padding: 0 6px; line-height: 1.6;
+    background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--fg-muted);
+  }
+  .cat-del:hover { border-color: var(--error); color: var(--error); }
+  @media (max-width: 860px) { .lore-split { grid-template-columns: 1fr; } }
+</style>
