@@ -1,5 +1,11 @@
 # Goal
-Rewrite of story_creator, deliberately simplified. Spec of record: `agent/brd.md` (v2.0) + `agent/technicaldoc_frontend.md` (UI) + `agent/technicaldoc_backend.md` (data model/API/deploy). **All future code must follow these three docs.** Work queue: `agent/todo.md`.
+Rewrite of story_creator, deliberately simplified. **User-facing brand is "Writing Buddy" (UI, README, docs) — but ALL backend/quadlet/systemd/DB names intentionally stay `novel`* (user instruction 2026-10-15): do not rename units, volumes, env vars, JS globals, or the DB.** Spec of record: `agent/brd.md` (v2.0) + `agent/technicaldoc_frontend.md` (UI) + `agent/technicaldoc_backend.md` (data model/API/deploy). **All future code must follow these three docs.** Work queue: `agent/todo.md`.
+
+# License
+**MIT** (top-level `LICENSE`, © 2026 kenetxk — repo is public on GitHub). Consequences for all future code:
+- Only add **permissive-licensed (MIT/BSD/Apache-2.0) or original** dependencies/code — never GPL/AGPL. (All current npm deps are MIT-compatible.)
+- `src/public/js/story.js` is an esbuild bundle of MIT-licensed CodeMirror — if any third-party code is ever vendored/inlined, ship its license notice with it (README notice section if it grows).
+- MIT needs no per-file copyright headers — do not add them.
 
 # How future sessions work
 1. **Read `agent/todo.md` first** — pick the first unchecked task. The build is **DONE** (all T-tasks + post-build polish); the work queue was **`agent/Feature_Request.md`** — **all 15 items implemented + tested** (FR-1..8 2026-10-08, FR-9..11 2026-10-09, FR-12/13 2026-10-11 "Change Request round 3": live CodeMirror markdown editors + `/keyword` lore search; FR-14/15 2026-10-13 "Change Request round 4": summarize hint + extract style; see the round sections in todo.md). **83 tests passing** (78 server + 5 headless client).
